@@ -1,0 +1,43 @@
+# C01 の設定。~/.config/c01/config.toml に置く（このファイルは見本。書いた項目だけが効く）。
+# 表（CSV）を変えたあとは `c01 compile` を実行する。ibus は次にその入力欄へ移ったときに読み直す。
+
+# 起動時のモード: direct（直接入力）/ kanji（漢字のみ）/ hanwa_hira（和漢混淆・平）/ hanwa_kata（和漢混淆・片）
+mode = "hanwa_hira"
+
+# ローマ字の方式。data/romaji/<名前>/ の下の hiragana.csv と katakana.csv を使う。
+# 自分の表は ~/.local/share/c01/romaji/<名前>/ に置く（同梱のものより優先される）
+romaji = "hepburn"
+
+# 記号の表（data/symbols/<名前>.csv）
+symbols = "default"
+
+# 倉頡の表（data/cangjie/<名前>.csv）と、それに足す表（々・ヶ など）。足す表は左から順に重なる
+cangjie = "cangjie5"
+cangjie_extra = ["custom"]
+
+# 仮名より先に出す漢字のリスト（data/priority/<名前>.csv）。a の 日 のように、単独で出やすい字を書く
+kanji_priority = "default"
+
+# 和漢混淆（片）で平仮名→片仮名に置き換える表（data/hira2kata/<名前>.csv）
+hira2kata = "default"
+
+# 字種の絞り込み: all（全部）/ trad（繁体字）/ simp（簡体字）/ shin（新字体）
+# trad・simp・shin を使うには、文字の分類表 variants を用意する（文字,分類 の CSV）
+script = "all"
+variants = ""
+
+# 入力中の表示: latin（打った英字そのまま）/ map（preedit_map の表で置き換える。倉頡なら部首の文字）
+preedit = "latin"
+preedit_map = "cangjie5"
+
+# エラー音（音声ファイルのパス）。空なら鳴らさない。pw-play / paplay / aplay / ffplay のどれかが要る
+error_sound = ""
+
+# 候補窓の1ページの件数（1〜10。数字キー 0〜9 が使える）
+page_size = 10
+
+# 先頭の倉頡を切り出すとき、1つの長さにつき出す漢字の最大数
+max_split_kanji = 3
+
+# モードを順に切り替えるキー
+mode_keys = ["ctrl+shift+m"]

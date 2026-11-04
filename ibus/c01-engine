@@ -1,0 +1,11 @@
+#!/usr/bin/python3
+# ibus-daemon から起動される入口。システムの python3（python3-gi が入っているもの）で動かす。
+import os
+import sys
+
+root = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+sys.path.insert(0, root)
+
+from c01.ibus_engine import main  # noqa: E402
+
+sys.exit(main(sys.argv[1:]))
