@@ -1,0 +1,30 @@
+### uv 固有の設定 ###
+.venv/
+
+### Python 共通のキャッシュ・出力ファイル ###
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+### クライアント・エディタ固有（VS Code / macOS） ###
+.vscode/
+.DS_Store
