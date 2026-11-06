@@ -47,7 +47,7 @@ class Config:
     # 起動時のモード: direct / kanji / hanwa_hira / hanwa_kata
     mode: str = "hanwa_hira"
     # data/romaji/<名前>/ の下の hiragana.csv と katakana.csv
-    romaji: str = "hepburn"
+    romaji: str = "max"
     # data/symbols/<名前>.csv
     symbols: str = "default"
     # data/cangjie/<名前>.csv  （倉頡の本体。上から順が優先順位）

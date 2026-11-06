@@ -1,5 +1,40 @@
 # 倉頡表への追加。文字,コード[,位置]   位置は first（そのコードの先頭に入れる）か空欄（末尾）
 # Cangjie5 に無い「々」「ヶ」を足す。コードは仮のもの（空いている2文字）。好きなコードに直してよい。
 # 直すときは ~/.local/share/c01/cangjie/custom.csv に同じ名前で置くと、同梱のものより優先される。
-々,ko
-ヶ,kh
+々,ni
+ヶ,oh
+㆒,m
+㆓,mm
+㆔,mmm
+㆕,wc
+㆖,ym
+㆗,l
+㆘,my
+㆙,wl
+㆚,nu
+㆛,mob
+㆜,mn
+㆑,lm
+㆝,mk
+㆞,gpd
+㆟,o
+⚋,c
+⚊,m
+⚏,cc
+⚎,mc
+⚍,cm
+⚌,mm
+☷,ccc
+☶,mcc
+☵,cmc
+☴,mmc
+☳,ccm
+☲,mcm
+☱,cmm
+☰,mmm
+ヿ,ml
+ヿ゙,ny
+ヽ,i
+ヾ,ly
+ヽ゚,lo
+𬼀,ih
