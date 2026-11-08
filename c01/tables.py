@@ -2,8 +2,9 @@
 
 どの表も UTF-8 で、`#` で始まる行と空行は無視する。
 
-  romaji/<方式>/hiragana.csv, katakana.csv : 入力, 出力[, 出力後に残す入力]
-  cangjie/<名前>.csv                       : 文字, コード[, first]     （head。上の行ほど優先）
+  head/<名前>.csv                          : 文字, コード[, first]     （倉頡表・追加字。上の行ほど優先）
+  tail/<名前>.csv                          : 入力, 出力[, 出力後に残す入力]   （尾辞の仮名表。平仮名なら和漢混淆、片仮名なら和漢混淆（片））
+  pure/<名前>.csv                          : 入力, 出力[, 出力後に残す入力]   （単独で構成するもの。片仮名など。最低優先度で並行して変換）
   compound/<名前>.txt                      : 1行に1項目（熟語・送り仮名・首辞となる仮名）。`る*` のような * が使える
   wildcards/<名前>.csv                     : 文字, 展開（`る*` を らりるれろっ に広げる）
   symbols/<名前>.csv                       : キー, 出力
@@ -12,7 +13,8 @@
 
 【考え方】どの打鍵列も「首辞」から始まり、そのあとに「尾辞」（仮名）が続く。
   首辞 = head の字（倉頡）、または compound の項目、または空文字（空が最下位）
-  尾辞 = 仮名表（平仮名か片仮名）で読める仮名の連なり
+  尾辞 = tail の仮名表で読める仮名の連なり
+  pure = 首辞も尾辞もなく、全体が1つの表で読めるもの（最低優先度）
 compound の項目は文字列で書き、打鍵列は、字を倉頡コード・仮名をローマ字表に逆変換して作る。
 """
 
@@ -30,7 +32,7 @@ from pathlib import Path
 from .config import Config, cache_dir, find_data
 from .kana import has_kana, parse_kana, script_of
 
-COMPILED_VERSION = 4
+COMPILED_VERSION = 5
 MAX_VARIANTS = 24  # 1つの項目から作る打鍵列の最大数
 MAX_WILDCARD = 256  # 1つの項目を * で広げる最大数
 
@@ -156,17 +158,32 @@ def _dedupe(seq):
     return list(dict.fromkeys(seq))
 
 
-class Reverse:
-    """字や仮名の列から、それを打つ打鍵列を作る。"""
+def table_script(table: dict[str, tuple[str, str]]) -> str:
+    """仮名表が平仮名の表('h')か片仮名の表('k')か。出力の文字種の多いほう。"""
+    count = {"h": 0, "k": 0}
+    for out, _ in table.values():
+        sc = script_of(out[0]) if out else ""
+        if sc:
+            count[sc] += 1
+    return "k" if count["k"] > count["h"] else "h"
 
-    def __init__(self, heads: dict[str, list[str]], hira: dict, kata: dict):
+
+class Reverse:
+    """字や仮名の列から、それを打つ打鍵列を作る。
+
+    仮名は、渡された仮名表（tail と pure）のうち、その文字種（平仮名・片仮名）の表を前から順に使う。
+    """
+
+    def __init__(self, heads: dict[str, list[str]], tables: list[dict[str, tuple[str, str]]]):
         self.codes: dict[str, list[str]] = {}
         for code, chars in heads.items():
             for ch in chars:
                 self.codes.setdefault(ch, []).append(code)
-        self.tables = {"h": hira, "k": kata}
-        self.units = {"h": _units(hira), "k": _units(kata)}
-        self.maxkey = {s: max((len(k) for k in t), default=0) for s, t in self.tables.items()}
+        self.tabs = []
+        for t in tables:
+            by_out, maxout = _units(t)
+            maxkey = max((len(k) for k in t), default=0)
+            self.tabs.append((table_script(t), t, by_out, maxout, maxkey))
 
     def run(self, text: str, script: str, final: bool) -> list[tuple[str, str]]:
         """同じ種類の仮名の連なり text の打鍵列。[(打鍵列, 残す入力)]
@@ -174,8 +191,14 @@ class Reverse:
         final=False（あとに仮名以外が続く）のとき、「残す入力」を持つ項目（促音の kk など）は使えない。
         最後の仮名のときだけ、っ を促音の形（tt など）で打てる。
         """
-        by_out, maxout = self.units[script]
-        table, maxkey = self.tables[script], self.maxkey[script]
+        out: list[tuple[str, str]] = []
+        for sc, table, by_out, maxout, maxkey in self.tabs:
+            if sc == script:
+                out.extend(self._run_one(text, final, table, by_out, maxout, maxkey))
+        return _dedupe(out)
+
+    @staticmethod
+    def _run_one(text, final, table, by_out, maxout, maxkey) -> list[tuple[str, str]]:
         n = len(text)
         memo: dict[int, list[tuple[str, str]]] = {}
 
@@ -237,9 +260,8 @@ class Reverse:
 class Compiled:
     version: int = COMPILED_VERSION
     fingerprint: str = ""
-    hira: dict[str, tuple[str, str]] = field(default_factory=dict)
-    kata: dict[str, tuple[str, str]] = field(default_factory=dict)
-    tail_kata: bool = False
+    tail: dict[str, tuple[str, str]] = field(default_factory=dict)
+    pures: tuple[dict[str, tuple[str, str]], ...] = ()
     # 打鍵列 → 字（首辞）
     heads: dict[str, tuple[str, ...]] = field(default_factory=dict)
     # 打鍵列 → [(出力, 残す入力, 仮名を含むか)]（複合首辞）
@@ -250,32 +272,25 @@ class Compiled:
     warnings: list[str] = field(default_factory=list)
 
     # 読み込み時に計算する（保存しない）
-    hira_max: int = 0
-    kata_max: int = 0
+    tail_max: int = 0
+    pure_max: tuple[int, ...] = ()
 
     def finalize(self) -> "Compiled":
-        self.hira_max = max((len(k) for k in self.hira), default=0)
-        self.kata_max = max((len(k) for k in self.kata), default=0)
+        self.tail_max = max((len(k) for k in self.tail), default=0)
+        self.pure_max = tuple(max((len(k) for k in t), default=0) for t in self.pures)
         return self
-
-    @property
-    def tail(self) -> dict[str, tuple[str, str]]:
-        return self.kata if self.tail_kata else self.hira
-
-    @property
-    def tail_max(self) -> int:
-        return self.kata_max if self.tail_kata else self.hira_max
 
 
 def _source_files(cfg: Config) -> dict[str, Path]:
     files: dict[str, Path] = {
-        "hira": find_data(f"romaji/{cfg.hiragana_scheme}/hiragana.csv"),
-        "kata": find_data(f"romaji/{cfg.katakana_scheme}/katakana.csv"),
+        "tail": find_data(f"tail/{cfg.tail}.csv"),
         "symbols": find_data(f"symbols/{cfg.symbols}.csv"),
         "wildcards": find_data(f"wildcards/{cfg.wildcards}.csv"),
     }
     for i, name in enumerate(cfg.head):
-        files[f"head{i:03d}"] = find_data(f"cangjie/{name}.csv")
+        files[f"head{i:03d}"] = find_data(f"head/{name}.csv")
+    for i, name in enumerate(cfg.pure):
+        files[f"pure{i:03d}"] = find_data(f"pure/{name}.csv")
     for i, name in enumerate(cfg.compound):
         files[f"compound{i:03d}"] = find_data(f"compound/{name}.txt")
     if cfg.preedit == "map":
@@ -290,7 +305,7 @@ def _fingerprint(cfg: Config, files: dict[str, Path]) -> str:
     h.update(str(COMPILED_VERSION).encode())
     # 実行に関わる項目だけ（モード・キー・音などは再コンパイル不要）
     relevant = {
-        "hira": cfg.hiragana_scheme, "kata": cfg.katakana_scheme, "tail": cfg.tail,
+        "tail": cfg.tail, "pure": cfg.pure,
         "head": cfg.head, "compound": cfg.compound, "wildcards": cfg.wildcards,
         "symbols": cfg.symbols, "variants": cfg.variants, "script": cfg.script,
         "preedit": cfg.preedit, "preedit_map": cfg.preedit_map,
@@ -314,9 +329,8 @@ def compile_tables(cfg: Config) -> Compiled:
     c = Compiled(fingerprint=_fingerprint(cfg, files))
     c.warnings.extend(cfg.notes)
 
-    c.hira = load_romaji(files["hira"])
-    c.kata = load_romaji(files["kata"])
-    c.tail_kata = cfg.tail == "katakana"
+    c.tail = load_romaji(files["tail"])
+    c.pures = tuple(load_romaji(files[k]) for k in sorted(files) if k.startswith("pure"))
 
     heads = load_cangjie([files[k] for k in sorted(files) if k.startswith("head")])
 
@@ -346,7 +360,7 @@ def compile_tables(cfg: Config) -> Compiled:
 
     # 複合首辞
     wc = load_pairs(files["wildcards"])
-    rev = Reverse(heads, c.hira, c.kata)
+    rev = Reverse(heads, [c.tail, *c.pures])
     compound: dict[str, list[tuple[str, str, bool]]] = {}
     for key in sorted(k for k in files if k.startswith("compound")):
         path = files[key]
@@ -385,7 +399,7 @@ def compile_tables(cfg: Config) -> Compiled:
 
     # 打鍵として受け取る文字: 仮名表と倉頡のコードに現れる文字、z（仮名の選択）、-
     chars: set[str] = {"-", "z"}
-    for t in (c.hira, c.kata):
+    for t in (c.tail, *c.pures):
         for k in t:
             chars.update(k)
     for k in c.heads:

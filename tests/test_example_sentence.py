@@ -1,7 +1,7 @@
 """利用者の例文を、新しい仕様（首辞・z による仮名選択）で打鍵列どおりに打って確かめる。
 
 元の例は 仮名を続けて打っていたが、新しい仕様では、首辞リストにない仮名のまとまりは末尾に z を付けて選ぶ。
-  ひらがなは → firaganafaz   ローマ → ro-maz   しているのです → siteirunodesuz
+  ひらがなは → firaganafaz   しているのです → siteirunodesuz   （ローマ は pure なので ro-ma のまま）
 は・の・で は首辞リスト（tests/conftest.py の user_kana.txt）に入れてある。
 """
 
@@ -11,7 +11,7 @@ from c01.core import Mode
 from c01.session import Key, Session
 
 KEYS = (
-    "hdi fa tca hjhne,firaganafaz ynib fbrlb no ro-maz jnd oh ks de,"
+    "hdi fa tca hjhne,firaganafaz ynib fbrlb no ro-ma jnd oh ks de,"
     "etlo jnd fa oiar grmbc jjomn oh egi de oh ks siteirunodesuz "
 )
 EXPECTED = "私は普段、ひらがなは通常のローマ字入力で、漢字は倉頡輸入法で入力しているのです"
@@ -41,7 +41,7 @@ def test_kana_head_needs_whitelist(user_compiled, user_cfg):
     s.reset()
     for ch in "fi":
         s.handle(Key(char=ch))
-    assert s.cands[0] != "ひ" and s.cands[-1] == "ひ"
+    assert s.cands[0] != "ひ" and s.cands[-2:] == ["ひ", "ヒ"]
     s.reset()
     for ch in "fiz":
         s.handle(Key(char=ch))
@@ -53,8 +53,8 @@ def test_without_whitelist_kana_loses_to_heads():
     from c01.config import Config
     from c01.tables import compile_tables
 
-    cfg = Config(romaji="user", compound=[])
+    cfg = Config(tail="hiragana-user", pure=["katakana-user"], compound=[])
     s = Session(compile_tables(cfg), cfg, Mode.HANWA)
     for ch in "no":
         s.handle(Key(char=ch))
-    assert s.cands[0] != "の" and s.cands[-1] == "の"
+    assert s.cands[0] != "の" and s.cands[-2:] == ["の", "ノ"]

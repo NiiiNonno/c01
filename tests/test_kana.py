@@ -60,5 +60,5 @@ def test_cli_try_and_compile(capsys):
     assert "複合首辞" in capsys.readouterr().out
     assert main(["try", "--", "giru"]) == 0
     assert "0:去る" in capsys.readouterr().out
-    assert main(["try", "-t", "katakana", "--", "giu"]) == 0
+    assert main(["try", "-t", "katakana-hepburn", "--", "giu"]) == 0
     assert "去ウ" in capsys.readouterr().out

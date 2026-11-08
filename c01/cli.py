@@ -48,9 +48,8 @@ def cmd_compile(args) -> int:
     print(f"コンパイルしました（{dt:.2f}秒）")
     n_head = sum(len(v) for v in c.heads.values())
     n_comp = sum(len(v) for v in c.compound.values())
-    print(f"  平仮名 {len(c.hira)} 件 / 片仮名 {len(c.kata)} 件 / 記号 {len(c.symbols)} 件")
+    print(f"  tail {len(c.tail)} 件 / pure {', '.join(str(len(t)) for t in c.pures) or '-'} 件 / 記号 {len(c.symbols)} 件")
     print(f"  首辞の字 {n_head} 字（{len(c.heads)} コード）/ 複合首辞 {n_comp} 件（{len(c.compound)} 打鍵列）")
-    print(f"  尾辞の表: {'片仮名' if c.tail_kata else '平仮名'}")
     for w in c.warnings:
         print(f"  注意: {w}")
     return 0
@@ -89,7 +88,7 @@ def cmd_try(args) -> int:
 
 
 def cmd_list(args) -> int:
-    for sub in ("romaji", "cangjie", "compound", "wildcards", "symbols", "preedit", "variants"):
+    for sub in ("head", "tail", "pure", "compound", "wildcards", "symbols", "preedit", "variants"):
         names = list_choices(sub)
         print(f"{sub}: {', '.join(names) if names else '(なし)'}")
     print(f"利用者の表を置く場所: {user_data_dir()}")
@@ -120,7 +119,7 @@ def cmd_kana(args) -> int:
 def cmd_import_cangjie(args) -> int:
     from .importer import import_cangjie5_txt
 
-    dst = Path(args.out) if args.out else user_data_dir() / "cangjie" / f"{args.name}.csv"
+    dst = Path(args.out) if args.out else user_data_dir() / "head" / f"{args.name}.csv"
     kept, skipped = import_cangjie5_txt(Path(args.src), dst, keep_z=args.keep_z)
     print(f"{dst} に {kept} 行を書きました（{skipped} 行は飛ばしました）")
     return 0
@@ -201,7 +200,7 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("try", help="変換の候補を確かめる")
     s.add_argument("keys", nargs="*", help="打鍵列（スペース区切りで複数）")
     s.add_argument("-m", "--mode", choices=[m.value for m in MODE_ORDER], help="モード（既定は設定のもの）")
-    s.add_argument("-t", "--tail", choices=["hiragana", "katakana"], help="尾辞の表（既定は設定のもの）")
+    s.add_argument("-t", "--tail", help="尾辞の表の名前（例: katakana-hepburn。既定は設定のもの）")
     s.add_argument("-n", "--limit", type=int, default=12, help="表示する候補の最大数")
     s.set_defaults(func=cmd_try)
 
@@ -217,7 +216,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     s = sub.add_parser("import-cangjie", help="Cangjie5*.txt をCSVに変換する")
     s.add_argument("src", help="Cangjie5.txt のパス")
-    s.add_argument("--name", default="cangjie5", help="利用者の表の名前（既定: cangjie5）")
+    s.add_argument("--name", default="cangjie5", help="利用者の表の名前（既定: cangjie5）。data/head/<名前>.csv に出る")
     s.add_argument("--out", help="出力先を直接指定する")
     s.add_argument("--keep-z", action="store_true", help="z で始まる特殊コードも残す")
     s.set_defaults(func=cmd_import_cangjie)

@@ -21,19 +21,20 @@ def cands(interp, buf, mode=Mode.HANWA):
 
 def test_parse_kana_basic(hepburn_compiled):
     c = hepburn_compiled
-    assert parse_kana(c.hira, c.hira_max, "kana") == "かな"
-    assert parse_kana(c.hira, c.hira_max, "onna") == "おんな"  # n + na ではなく ん + な
-    assert parse_kana(c.hira, c.hira_max, "kekkon") == "けっこん"
-    assert parse_kana(c.hira, c.hira_max, "k") is None
-    assert parse_kana(c.hira, c.hira_max, "") == ""
+    assert parse_kana(c.tail, c.tail_max, "kana") == "かな"
+    assert parse_kana(c.tail, c.tail_max, "onna") == "おんな"  # n + na ではなく ん + な
+    assert parse_kana(c.tail, c.tail_max, "kekkon") == "けっこん"
+    assert parse_kana(c.tail, c.tail_max, "k") is None
+    assert parse_kana(c.tail, c.tail_max, "") == ""
 
 
 def test_hiragana_table_has_no_contracted_sounds_or_hyphen(hepburn_compiled):
     c = hepburn_compiled
-    assert parse_kana(c.hira, c.hira_max, "kya") is None
-    assert parse_kana(c.hira, c.hira_max, "kilya") == "きゃ"
-    assert parse_kana(c.hira, c.hira_max, "yu-za-") is None  # ー は平仮名表に無い
-    assert parse_kana(c.kata, c.kata_max, "kya") == "キャ"
+    pure, pmax = c.pures[0], c.pure_max[0]
+    assert parse_kana(c.tail, c.tail_max, "kya") is None
+    assert parse_kana(c.tail, c.tail_max, "kilya") == "きゃ"
+    assert parse_kana(c.tail, c.tail_max, "yu-za-") is None  # ー は平仮名表に無い
+    assert parse_kana(pure, pmax, "kya") == "キャ"
 
 
 # ---- 長さで決まる（仮名だから優先、ということはない） ----------------------------
@@ -60,13 +61,13 @@ def test_kana_not_in_whitelist_is_not_preferred(interp):
     """a は日。あ はリストに無いので、漢字のあと（空首辞なので最下位）。"""
     c = cands(interp, "a")
     assert c[:2] == ["日", "曰"]
-    assert c[-1] == "あ"
+    assert c[-2:] == ["あ", "ア"]  # 空首辞（尾辞だけ）、その次が pure
 
 
 def test_empty_head_is_lowest(interp):
     """全体が仮名として読めても、空の首辞は最下位。"""
     c = cands(interp, "ai")
-    assert c[0] == "旷" and c[-1] == "あい"
+    assert c[0] == "旷" and c[-2:] == ["あい", "アイ"]
     assert "日い" in c and c.index("日い") < c.index("あい")
 
 
@@ -81,7 +82,7 @@ def test_okurigana_list_fixes_saru(interp):
     c = cands(interp, "giru")
     assert c[0] == "去る"
     assert c.index("去る") < c.index("坮う")
-    assert c[-1] == "ぎる"
+    assert c[-2:] == ["ぎる", "ギル"]
 
 
 def test_okurigana_wildcard_forms(interp):
@@ -113,7 +114,7 @@ def test_mixed_entries_round_trip(hepburn_compiled):
 
     interp = Interpreter(hepburn_compiled)
     rev = Reverse(
-        {k: list(v) for k, v in hepburn_compiled.heads.items()}, hepburn_compiled.hira, hepburn_compiled.kata
+        {k: list(v) for k, v in hepburn_compiled.heads.items()}, [hepburn_compiled.tail, *hepburn_compiled.pures]
     )
     for word in ("真ん中", "ラ行", "その他", "真っ当"):
         strokes = rev.strokes(word)
@@ -127,7 +128,7 @@ def test_nn_vowel_ambiguity_is_filtered(hepburn_compiled):
     """ほんの を ho+n+no = hono と打つと ほの と読まれてしまうので、その打鍵列は作らない。"""
     from c01.tables import Reverse
 
-    rev = Reverse({}, hepburn_compiled.hira, hepburn_compiled.kata)
+    rev = Reverse({}, [hepburn_compiled.tail, *hepburn_compiled.pures])
     strokes = [s for s, _ in rev.strokes("ほんの")]
     assert strokes and "hono" not in strokes
     assert "hon'no" in strokes
@@ -136,17 +137,16 @@ def test_nn_vowel_ambiguity_is_filtered(hepburn_compiled):
 def test_small_tsu_before_kanji_needs_standalone_entry(tmp_path, monkeypatch):
     """っ<漢字> は、単独で っ を打てる入力が仮名表にあるときだけ。"""
     monkeypatch.setenv("C01_DATA_DIR", str(tmp_path))
-    write_csv(tmp_path / "romaji/mini/hiragana.csv", [("ta", "た"), ("tt", "っ", "t"), ("to", "と")])
-    write_csv(tmp_path / "romaji/mini/katakana.csv", [("ta", "タ")])
-    write_csv(tmp_path / "cangjie/mini.csv", [("真", "ab"), ("当", "cd")])
+    write_csv(tmp_path / "tail/mini.csv", [("ta", "た"), ("tt", "っ", "t"), ("to", "と")])
+    write_csv(tmp_path / "head/mini.csv", [("真", "ab"), ("当", "cd")])
     (tmp_path / "compound").mkdir()
     (tmp_path / "compound/m.txt").write_text("真っ当\n", encoding="utf-8")
-    cfg = Config(romaji="mini", head=["mini"], compound=["m"])
+    cfg = Config(tail="mini", pure=[], head=["mini"], compound=["m"])
     c = compile_tables(cfg)
     assert c.compound == {}  # tt は「次の子音を残す」形なので、漢字の前には使えない
     assert any("真っ当" in w for w in c.warnings)
 
-    write_csv(tmp_path / "romaji/mini/hiragana.csv", [("ta", "た"), ("tt", "っ", "t"), ("ltu", "っ"), ("to", "と")])
+    write_csv(tmp_path / "tail/mini.csv", [("ta", "た"), ("tt", "っ", "t"), ("ltu", "っ"), ("to", "と")])
     c = compile_tables(cfg)
     assert list(c.compound) == ["abltucd"]
     assert Interpreter(c).candidates("abltucd", Mode.HANWA)[0] == "真っ当"
@@ -176,11 +176,36 @@ def test_z_ignores_heads_and_compounds(interp):
     assert cands(interp, "niz") == ["に", "ニ"]
 
 
-def test_hyphen_alone_is_not_special(interp):
-    """- は、先頭でもただの長音（片仮名表の ー）。片仮名にするのは z だけ。"""
-    assert cands(interp, "-katakana") == []
+def test_hyphen_is_just_a_long_vowel_in_pure(interp):
+    """- は特別なキーではなく、片仮名表（pure）の ー。先頭にあっても同じ。"""
+    assert cands(interp, "-katakana") == ["ーカタカナ"]
     assert cands(interp, "katakanaz") == ["かたかな", "カタカナ"]
     assert cands(interp, "-katakanaz") == ["ーカタカナ"]
+
+
+# ---- pure（単独で構成するもの）は、z なしでも並行して変換される -------------------------
+
+def test_pure_runs_in_parallel_without_z(interp):
+    """平仮名表で読めず、- を含むので、片仮名だけが候補になる（z は要らない）。"""
+    assert cands(interp, "yu-za-") == ["ユーザー"]
+    assert cands(interp, "kyaku")[-1] == "キャク"
+
+
+def test_pure_is_lowest_priority(interp):
+    c = cands(interp, "kana")
+    assert c[-2:] == ["かな", "カナ"]
+    assert len(c) > 2  # 倉頡の候補が先に並ぶ
+
+
+def test_z_only_narrows_the_same_pure_candidates(interp):
+    assert cands(interp, "kanaz") == cands(interp, "kana")[-2:]
+    assert cands(interp, "yu-za-z") == cands(interp, "yu-za-")
+
+
+def test_no_pure_tables_means_no_pure_candidates():
+    it = Interpreter(compile_tables(Config(pure=[])))
+    assert it.candidates("kana", Mode.HANWA)[-1] == "かな"
+    assert it.candidates("yu-za-", Mode.HANWA) == []
 
 
 # ---- モード ------------------------------------------------------------------
@@ -203,7 +228,7 @@ def test_unreadable_gives_empty(interp):
 
 def test_tail_katakana_is_wakan_konkou_kata(hepburn_compiled):
     """tail を片仮名にすると、首辞のあとの仮名が片仮名になる（和漢混淆・片）。"""
-    c = compile_tables(Config(tail="katakana"))
+    c = compile_tables(Config(tail="katakana-hepburn"))
     it = Interpreter(c)
     assert it.candidates("giu", Mode.HANWA)[:1] == ["去ウ"]
     assert "去ク" in it.candidates("giku", Mode.HANWA)  # gi + ku の ku が片仮名になる

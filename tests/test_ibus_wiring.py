@@ -143,7 +143,7 @@ def test_typing_shows_preedit_and_candidates(engine):
     type_keys(engine, "ai")
     assert engine.preedit == ("ai", True)
     assert engine.table.cands[:2] == ["旷", "𮲜"]
-    assert engine.table.cands[-1] == "あい"  # 空首辞（尾辞だけ）は最下位
+    assert engine.table.cands[-2:] == ["あい", "アイ"]  # 空首辞（尾辞だけ）、pure の順に最下位
     assert engine.table.labels[0] == "0" and engine.lookup_visible
     assert engine.aux[1] is True and engine.aux[0].startswith("[和]")
 

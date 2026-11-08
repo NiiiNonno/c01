@@ -57,8 +57,9 @@ def write_csv(path: Path, rows, header: str = "") -> None:
 @pytest.fixture(scope="session")
 def user_data(tmp_path_factory) -> Path:
     d = tmp_path_factory.mktemp("c01data")
-    write_csv(d / "romaji/user/hiragana.csv", user_hira_rows(), "# テスト用")
-    write_csv(d / "romaji/user/katakana.csv", user_kata_rows(), "# テスト用")
+    write_csv(d / "tail/hiragana-user.csv", user_hira_rows(), "# テスト用")
+    write_csv(d / "tail/katakana-user.csv", user_kata_rows(), "# テスト用")
+    write_csv(d / "pure/katakana-user.csv", user_kata_rows(), "# テスト用")
     # 首辞となる平仮名のリスト（は・の・で だけ。ほかの仮名は z で選ぶ）
     (d / "compound").mkdir(parents=True, exist_ok=True)
     (d / "compound/user_kana.txt").write_text("# テスト用\nは\nの\nで\n", encoding="utf-8")
@@ -75,7 +76,7 @@ def isolated_dirs(tmp_path, monkeypatch, user_data):
 
 @pytest.fixture(scope="session")
 def user_cfg() -> Config:
-    return Config(romaji="user", compound=["user_kana"])
+    return Config(tail="hiragana-user", pure=["katakana-user"], compound=["user_kana"])
 
 
 def _compile_with_data(cfg: Config, data_dir: Path):
@@ -100,4 +101,4 @@ def user_compiled(user_cfg, user_data):
 
 @pytest.fixture(scope="session")
 def hepburn_compiled():
-    return compile_tables(Config(romaji="hepburn"))
+    return compile_tables(Config())

@@ -139,18 +139,19 @@ def test_arrow_wraps_around(s):
 
 def test_paging(hepburn_compiled):
     s = make(hepburn_compiled, page_size=2)
-    typed(s, "giru")  # ['去る', '坮う', '圹る', '圡る', '土いる', 'ぎる']
-    assert len(s.cands) == 6
+    typed(s, "giru")  # ['去る', '坮う', '圹る', '圡る', '土いる', 'ぎる', 'ギル']
+    assert len(s.cands) == 7
     press(s, "Page_Down")
     assert s.cursor == 2 and s.page_start == 2
     press(s, "Page_Down")
-    assert s.page_start == 4
+    press(s, "Page_Down")
+    assert s.page_start == 6  # 最後のページ（1件だけ）
     press(s, "Page_Down")  # 最後のページの次は先頭へ
     assert s.cursor == 0
     press(s, "Page_Up")  # 先頭の前は最後のページへ
-    assert s.page_start == 4
+    assert s.page_start == 6
     press(s, "Page_Up")
-    assert s.page_start == 2
+    assert s.page_start == 4
 
 
 def test_digit_uses_current_page(hepburn_compiled):
@@ -202,6 +203,13 @@ def test_z_selects_kana(s):
 
 def test_z_katakana_word_with_long_vowel(s):
     typed(s, "yu-za-z")
+    assert press(s, "space").commit == "ユーザー"
+
+
+def test_katakana_word_without_z(s):
+    """pure は z なしでも並行して変換される。"""
+    typed(s, "yu-za-")
+    assert s.cands == ["ユーザー"]
     assert press(s, "space").commit == "ユーザー"
 
 

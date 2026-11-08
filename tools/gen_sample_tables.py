@@ -134,18 +134,24 @@ def write_csv(path: Path, header: str, rows):
 def main():
     hira = make_hira()
     write_csv(
-        DATA / "romaji/hepburn/hiragana.csv",
-        "# 平仮名用（ヘボン式）。入力,出力,出力後に残す入力\n"
-        "# 拗音は lya などでのみ入力。kya などは片仮名用にだけある\n"
+        DATA / "tail/hiragana-hepburn.csv",
+        "# tail（尾辞）用の平仮名表（ヘボン式・見本）。入力,出力,出力後に残す入力\n"
+        "# 拗音は lya などでのみ入力。kya などは片仮名の表にだけある。ー（-）は書かない\n"
         "# 同じ入力が複数あれば後の行が優先",
         hira,
     )
-    kata = [(k, to_kata(o), n) for k, o, n in make_kata_base()]
     # 促音の残りは入力側なのでそのまま。出力の「っ」は「ッ」になる
+    kata = [(k, to_kata(o), n) for k, o, n in make_kata_base()]
     write_csv(
-        DATA / "romaji/hepburn/katakana.csv",
-        "# 片仮名用（ヘボン式）。入力,出力,出力後に残す入力\n"
-        "# 平仮名用に加えて、拗音（kya など）と外来音を含む",
+        DATA / "tail/katakana-hepburn.csv",
+        "# tail（尾辞）用の片仮名表（ヘボン式・見本）。tail にこれを選ぶと和漢混淆（片）になる\n"
+        "# 入力,出力,出力後に残す入力",
+        kata,
+    )
+    write_csv(
+        DATA / "pure/katakana-hepburn.csv",
+        "# pure（単独で構成するもの）用の片仮名表（ヘボン式・見本）。入力,出力,出力後に残す入力\n"
+        "# 平仮名用に加えて、拗音（kya など）と外来音、長音（-）を含む。いつも最低優先度の候補として並行して変換される",
         kata,
     )
 

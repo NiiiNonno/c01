@@ -106,7 +106,7 @@ def test_bundled_wildcards_cover_stated_rows():
 
 def _mini(tmp_path, monkeypatch, **extra):
     monkeypatch.setenv("C01_DATA_DIR", str(tmp_path))
-    write_csv(tmp_path / "cangjie/mini.csv", [("日", "a"), ("倉", "oiar"), ("仓", "oiar")])
+    write_csv(tmp_path / "head/mini.csv", [("日", "a"), ("倉", "oiar"), ("仓", "oiar")])
     return Config(head=["mini"], compound=[], **extra)
 
 
@@ -145,7 +145,7 @@ def test_compile_cache_reused_and_invalidated(tmp_path, monkeypatch):
     c1 = load_or_compile(cfg)
     assert c1.fingerprint == current_fingerprint(cfg)
     assert load_or_compile(cfg).fingerprint == c1.fingerprint
-    write_csv(tmp_path / "cangjie/mini.csv", [("日", "a"), ("月", "b")])  # サイズが変わる
+    write_csv(tmp_path / "head/mini.csv", [("日", "a"), ("月", "b")])  # サイズが変わる
     assert current_fingerprint(cfg) != c1.fingerprint
     assert load_or_compile(cfg).heads["b"] == ("月",)
 
@@ -162,7 +162,7 @@ def test_compound_list_change_invalidates_cache(tmp_path, monkeypatch):
 
 def test_user_table_overrides_bundled(tmp_path, monkeypatch):
     monkeypatch.setenv("C01_DATA_DIR", str(tmp_path))
-    write_csv(tmp_path / "cangjie/custom.csv", [("々", "xyz")])  # 同梱の custom.csv を置き換える
+    write_csv(tmp_path / "head/custom.csv", [("々", "xyz")])  # 同梱の custom.csv を置き換える
     c = compile_tables(Config())
     assert c.heads["xyz"] == ("々",)
     assert "々" not in c.heads.get("ko", ())  # 同梱の割り当ては使われない
@@ -181,8 +181,8 @@ def test_compound_priority_follows_list_order(tmp_path, monkeypatch):
 
 def test_head_priority_follows_list_order(tmp_path, monkeypatch):
     monkeypatch.setenv("C01_DATA_DIR", str(tmp_path))
-    write_csv(tmp_path / "cangjie/p.csv", [("日", "a")])
-    write_csv(tmp_path / "cangjie/q.csv", [("曰", "a")])
+    write_csv(tmp_path / "head/p.csv", [("日", "a")])
+    write_csv(tmp_path / "head/q.csv", [("曰", "a")])
     assert compile_tables(Config(head=["p", "q"], compound=[])).heads["a"] == ("日", "曰")
     assert compile_tables(Config(head=["q", "p"], compound=[])).heads["a"] == ("曰", "日")
 
@@ -201,16 +201,34 @@ def test_unmakeable_entries_warn_and_are_skipped(tmp_path, monkeypatch):
 
 def test_config_defaults_when_file_missing():
     cfg = load_config()
-    assert cfg.mode == "hanwa" and cfg.romaji == "hepburn" and cfg.tail == "hiragana"
+    assert cfg.mode == "hanwa" and cfg.tail == "hiragana-hepburn" and cfg.pure == ["katakana-hepburn"]
     assert cfg.head == ["cangjie5", "custom"]
     assert cfg.compound == ["jukugo", "okurigana", "kana_head"]
 
 
-def test_config_hiragana_and_katakana_schemes_are_independent(tmp_path):
+def test_config_old_romaji_keys_become_tail_and_pure(tmp_path):
     p = tmp_path / "c.toml"
     p.write_text('romaji = "a"\nkatakana = "b"\n', encoding="utf-8")
     cfg = load_config(p)
-    assert (cfg.hiragana_scheme, cfg.katakana_scheme) == ("a", "b")
+    assert cfg.tail == "hiragana-a" and cfg.pure == ["katakana-b"]
+
+
+def test_old_data_layout_is_still_found(tmp_path, monkeypatch):
+    """前の配置（cangjie/ と romaji/<方式>/）に置いた利用者の表も読める。"""
+    monkeypatch.setenv("C01_DATA_DIR", str(tmp_path))
+    write_csv(tmp_path / "romaji/zz/hiragana.csv", [("a", "あ")])
+    write_csv(tmp_path / "romaji/zz/katakana.csv", [("a", "ア")])
+    write_csv(tmp_path / "cangjie/old.csv", [("日", "a")])
+    cfg = Config(tail="hiragana-zz", pure=["katakana-zz"], head=["old"], compound=[])
+    c = compile_tables(cfg)
+    assert c.tail == {"a": ("あ", "")} and c.pures[0] == {"a": ("ア", "")} and c.heads == {"a": ("日",)}
+
+
+def test_new_layout_wins_over_old(tmp_path, monkeypatch):
+    monkeypatch.setenv("C01_DATA_DIR", str(tmp_path))
+    write_csv(tmp_path / "head/x.csv", [("新", "a")])
+    write_csv(tmp_path / "cangjie/x.csv", [("旧", "a")])
+    assert compile_tables(Config(head=["x"], compound=[])).heads == {"a": ("新",)}
 
 
 def test_config_migrates_old_keys(tmp_path):
@@ -221,10 +239,10 @@ def test_config_migrates_old_keys(tmp_path):
         encoding="utf-8",
     )
     cfg = load_config(p)
-    assert (cfg.mode, cfg.tail) == ("hanwa", "katakana")
+    assert cfg.mode == "hanwa" and cfg.tail == "katakana-hepburn" and cfg.pure == ["katakana-hepburn"]
     assert cfg.head == ["cangjie5", "custom"]
-    assert len(cfg.notes) == 4
-    assert compile_tables(cfg).warnings[:4] == cfg.notes  # 注意は、コンパイルの結果にも出る
+    assert len(cfg.notes) == 5
+    assert compile_tables(cfg).warnings[:5] == cfg.notes  # 注意は、コンパイルの結果にも出る
 
 
 def test_config_reads_toml(tmp_path):
@@ -235,7 +253,7 @@ def test_config_reads_toml(tmp_path):
 
 
 @pytest.mark.parametrize(
-    "body", ['mode = "nope"', 'tail = "x"', "head = []", "page_size = 0", 'script = "x"', "zzz = 1", "= broken"]
+    "body", ['mode = "nope"', 'tail = ""', "head = []", "page_size = 0", 'script = "x"', "zzz = 1", "= broken"]
 )
 def test_config_rejects_bad_values(tmp_path, body):
     p = tmp_path / "c.toml"
