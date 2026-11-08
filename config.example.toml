@@ -1,25 +1,32 @@
 # C01 の設定。~/.config/c01/config.toml に置く（このファイルは見本。書いた項目だけが効く）。
-# 表（CSV）を変えたあとは `c01 compile` を実行する。ibus は次にその入力欄へ移ったときに読み直す。
+# 表（CSV・テキスト）を変えたあとは `c01 compile` を実行する。ibus は次にその入力欄へ移ったときに読み直す。
 
-# 起動時のモード: direct（直接入力）/ kanji（漢字のみ）/ hanwa_hira（和漢混淆・平）/ hanwa_kata（和漢混淆・片）
-mode = "hanwa_hira"
+# 起動時のモード: direct（直接入力）/ kanji（漢字のみ）/ hanwa（和漢混淆）
+mode = "hanwa"
 
 # ローマ字の方式。data/romaji/<名前>/ の下の hiragana.csv と katakana.csv を使う。
 # 自分の表は ~/.local/share/c01/romaji/<名前>/ に置く（同梱のものより優先される）
 romaji = "hepburn"
+# 平仮名表・片仮名表を別々の方式から選ぶとき（空なら romaji と同じ）
+hiragana = ""
+katakana = ""
+
+# 尾辞（首辞のあとに続く仮名）に使う表: hiragana / katakana
+# katakana にすると、首辞のあとの仮名が片仮名になる（和漢混淆・片。漢文訓読体を書くとき）
+tail = "hiragana"
+
+# 首辞になる字の表（data/cangjie/<名前>.csv）。倉頡表・追加字。左から順に優先される
+head = ["cangjie5", "custom"]
+
+# 複合首辞のリスト（data/compound/<名前>.txt）。熟語・送り仮名つきの語・首辞となる平仮名。左から順に優先される
+# 和漢混淆（片）にするときは、`c01 kana` で片仮名にしたリストを置いて、ここに加える
+compound = ["jukugo", "okurigana", "kana_head"]
+
+# ワイルドカード（る* など）の展開表（data/wildcards/<名前>.csv）
+wildcards = "default"
 
 # 記号の表（data/symbols/<名前>.csv）
 symbols = "default"
-
-# 倉頡の表（data/cangjie/<名前>.csv）と、それに足す表（々・ヶ など）。足す表は左から順に重なる
-cangjie = "cangjie5"
-cangjie_extra = ["custom"]
-
-# 仮名より先に出す漢字のリスト（data/priority/<名前>.csv）。a の 日 のように、単独で出やすい字を書く
-kanji_priority = "default"
-
-# 和漢混淆（片）で平仮名→片仮名に置き換える表（data/hira2kata/<名前>.csv）
-hira2kata = "default"
 
 # 字種の絞り込み: all（全部）/ trad（繁体字）/ simp（簡体字）/ shin（新字体）
 # trad・simp・shin を使うには、文字の分類表 variants を用意する（文字,分類 の CSV）
@@ -36,7 +43,7 @@ error_sound = ""
 # 候補窓の1ページの件数（1〜10。数字キー 0〜9 が使える）
 page_size = 10
 
-# 先頭の倉頡を切り出すとき、1つの長さにつき出す漢字の最大数
+# 首辞のあとに尾辞が続く候補で、1つの打鍵長につき出す字の最大数（全体が1字で読める候補には効かない）
 max_split_kanji = 3
 
 # モードを順に切り替えるキー

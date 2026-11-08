@@ -55,7 +55,6 @@ def base_gojuon(table):
         add(table, key, out)
     add(table, "n'", "ん")
     add(table, "n", "ん")  # 「nn」は入れない: onna → おんな と読めるように
-    add(table, "-", "ー")
 
 
 def small_kana(table):
@@ -105,6 +104,7 @@ def make_kata_base():
         ("wi", "うぃ", ""), ("we", "うぇ", ""),
     ]
     t += youon
+    t.append(("-", "ー", ""))  # 長音は片仮名用だけ（平仮名で ー を打つことはない）
     # 拗音の前の促音（kkya など）
     for c in "kstpgzdbjf":
         pass  # c+c は上の sokuon() で「っ + 残り c」として登録済み
@@ -161,17 +161,6 @@ def main():
         DATA / "symbols/ascii.csv",
         "# 記号キーをそのまま半角で入れる（空の表）。キー,出力",
         [],
-    )
-    write_csv(
-        DATA / "priority/default.csv",
-        "# 仮名より先に出す漢字（1行に1つ）。単独で仮名にしにくい a u e o に対応する漢字",
-        [("日",), ("山",), ("水",), ("人",)],
-    )
-    h2k = [(chr(o), chr(o + 0x60)) for o in range(0x3041, 0x3097)] + [("ゝ", "ヽ"), ("ゞ", "ヾ")]
-    write_csv(
-        DATA / "hira2kata/default.csv",
-        "# 和漢混淆（片）で、平仮名を片仮名に置き換える表。平仮名,片仮名",
-        h2k,
     )
     radicals = dict(zip("abcdefghijklmnopqrstuvwxy", "日月金木水火土竹戈十大中一弓人心手口尸廿山女田難卜"))
     write_csv(

@@ -1,20 +1,24 @@
-"""利用者の例文を、打鍵列どおりに打って確かめる。"""
+"""利用者の例文を、新しい仕様（首辞・z による仮名選択）で打鍵列どおりに打って確かめる。
+
+元の例は 仮名を続けて打っていたが、新しい仕様では、首辞リストにない仮名のまとまりは末尾に z を付けて選ぶ。
+  ひらがなは → firaganafaz   ローマ → ro-maz   しているのです → siteirunodesuz
+は・の・で は首辞リスト（tests/conftest.py の user_kana.txt）に入れてある。
+"""
 
 from __future__ import annotations
 
 from c01.core import Mode
 from c01.session import Key, Session
 
-# 元の例の `ro-ma` は、仕様の片仮名の合図に合わせて `-ro-ma` とした（ローマ字のローマ）
 KEYS = (
-    "hdi fa tca hjhne,firaganafa ynib fbrlb no -ro-ma jnd oh ks de,"
-    "etlo jnd fa oiar grmbc jjomn oh egi de oh ks siteirunodesu "
+    "hdi fa tca hjhne,firaganafaz ynib fbrlb no ro-maz jnd oh ks de,"
+    "etlo jnd fa oiar grmbc jjomn oh egi de oh ks siteirunodesuz "
 )
 EXPECTED = "私は普段、ひらがなは通常のローマ字入力で、漢字は倉頡輸入法で入力しているのです"
 
 
 def run(compiled, cfg, keys):
-    s = Session(compiled, cfg, Mode.HANWA_HIRA)
+    s = Session(compiled, cfg, Mode.HANWA)
     out = []
     for ch in keys:
         key = Key(name="space", char=" ") if ch == " " else Key(char=ch)
@@ -24,20 +28,33 @@ def run(compiled, cfg, keys):
     return "".join(out)
 
 
-def test_user_example_with_priority_list(user_compiled_prio, user_cfg_prio):
-    """法(egi)を漢字優先リストに入れておけば、例文がそのまま打てる。"""
-    assert run(user_compiled_prio, user_cfg_prio, KEYS) == EXPECTED
+def test_user_example(user_compiled, user_cfg):
+    assert run(user_compiled, user_cfg, KEYS) == EXPECTED
 
 
-def test_egi_is_ambiguous_without_priority_entry(user_compiled, user_cfg):
-    """リストに無いと、仮名優先の決まりどおり えぎ が先に出る（法は2番目）。"""
-    s = Session(user_compiled, user_cfg, Mode.HANWA_HIRA)
-    for ch in "egi":
+def test_kana_head_needs_whitelist(user_compiled, user_cfg):
+    """首辞リストに入れた は は fa で打てるが、入れていない ひ は fi では打てない（z で選ぶ）。"""
+    s = Session(user_compiled, user_cfg, Mode.HANWA)
+    for ch in "fa":
         s.handle(Key(char=ch))
-    assert s.cands[:2] == ["えぎ", "法"]
+    assert s.cands[0] == "は"
+    s.reset()
+    for ch in "fi":
+        s.handle(Key(char=ch))
+    assert s.cands[0] != "ひ" and s.cands[-1] == "ひ"
+    s.reset()
+    for ch in "fiz":
+        s.handle(Key(char=ch))
+    assert s.cands == ["ひ", "ヒ"]
 
 
-def test_example_everything_else_resolves_without_priority(user_compiled, user_cfg):
-    """法以外は、特別な設定なしで第0候補が正しい。"""
-    got = run(user_compiled, user_cfg, KEYS)
-    assert got == EXPECTED.replace("輸入法", "輸入えぎ")
+def test_without_whitelist_kana_loses_to_heads():
+    """の が首辞リストに無ければ no は 弓人 系の字が先になる（仕様どおり。リストで調整する）。"""
+    from c01.config import Config
+    from c01.tables import compile_tables
+
+    cfg = Config(romaji="user", compound=[])
+    s = Session(compile_tables(cfg), cfg, Mode.HANWA)
+    for ch in "no":
+        s.handle(Key(char=ch))
+    assert s.cands[0] != "の" and s.cands[-1] == "の"

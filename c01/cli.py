@@ -3,6 +3,7 @@
   c01 compile            表をコンパイルする（設定やCSVを変えたら実行）
   c01 try [打鍵列...]     変換の候補を確かめる（引数なしなら対話）
   c01 list               選べる表の一覧
+  c01 kana [FILE...]     テキストの平仮名を片仮名に変える（-r で逆）
   c01 import-cangjie F   Cangjie5*.txt を C01 の CSV に変換する
   c01 install-ibus       ibus に C01 を登録する
 """
@@ -24,6 +25,7 @@ from .config import (
     user_data_dir,
 )
 from .core import MODE_ORDER, Interpreter, Mode
+from .kana import hira_to_kata, kata_to_hira
 from .tables import TableError, compile_tables, load_or_compile, save_compiled
 
 
@@ -31,7 +33,9 @@ def _load(args) -> tuple:
     cfg = load_config(args.config)
     if getattr(args, "mode", None):
         cfg.mode = args.mode
-        cfg.validate()
+    if getattr(args, "tail", None):
+        cfg.tail = args.tail
+    cfg.validate()
     return cfg
 
 
@@ -42,8 +46,11 @@ def cmd_compile(args) -> int:
     save_compiled(c)
     dt = time.perf_counter() - t
     print(f"コンパイルしました（{dt:.2f}秒）")
+    n_head = sum(len(v) for v in c.heads.values())
+    n_comp = sum(len(v) for v in c.compound.values())
     print(f"  平仮名 {len(c.hira)} 件 / 片仮名 {len(c.kata)} 件 / 記号 {len(c.symbols)} 件")
-    print(f"  倉頡 {len(c.cangjie)} コード（最長 {c.cj_max} 文字）/ 漢字優先 {len(c.priority)} 字")
+    print(f"  首辞の字 {n_head} 字（{len(c.heads)} コード）/ 複合首辞 {n_comp} 件（{len(c.compound)} 打鍵列）")
+    print(f"  尾辞の表: {'片仮名' if c.tail_kata else '平仮名'}")
     for w in c.warnings:
         print(f"  注意: {w}")
     return 0
@@ -82,11 +89,31 @@ def cmd_try(args) -> int:
 
 
 def cmd_list(args) -> int:
-    for sub in ("romaji", "cangjie", "symbols", "priority", "hira2kata", "preedit", "variants"):
+    for sub in ("romaji", "cangjie", "compound", "wildcards", "symbols", "preedit", "variants"):
         names = list_choices(sub)
         print(f"{sub}: {', '.join(names) if names else '(なし)'}")
     print(f"利用者の表を置く場所: {user_data_dir()}")
     print(f"設定ファイル: {default_config_path()}")
+    return 0
+
+
+def cmd_kana(args) -> int:
+    conv = kata_to_hira if args.reverse else hira_to_kata
+    if not args.files:
+        if args.in_place:
+            print("-i はファイルを指定したときだけ使えます", file=sys.stderr)
+            return 2
+        sys.stdout.write(conv(sys.stdin.read()))
+        return 0
+    for name in args.files:
+        path = Path(name)
+        text = conv(path.read_text(encoding="utf-8"))
+        if args.in_place:
+            path.write_text(text, encoding="utf-8")
+        elif args.output:
+            Path(args.output).write_text(text, encoding="utf-8")
+        else:
+            sys.stdout.write(text)
     return 0
 
 
@@ -135,7 +162,8 @@ def cmd_install_ibus(args) -> int:
         return 1
     launcher.chmod(launcher.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
 
-    if args.system:
+    if not args.user:
+        # ibus-daemon が確実に読むのは /usr/share/ibus/component（と IBUS_COMPONENT_PATH）だけ
         comp_dir = Path("/usr/share/ibus/component")
     else:
         base = os.environ.get("XDG_DATA_HOME") or str(Path.home() / ".local" / "share")
@@ -150,12 +178,14 @@ def cmd_install_ibus(args) -> int:
         comp_dir.mkdir(parents=True, exist_ok=True)
         dst.write_text(xml, encoding="utf-8")
     except PermissionError:
-        print(f"{dst} に書けません。--system のときは sudo で実行してください", file=sys.stderr)
+        print(f"{dst} に書けません。sudo で実行してください（sudo python3 -m c01 install-ibus）", file=sys.stderr)
         return 1
     print(f"{dst} を書きました")
     print("次を実行すると反映されます:")
     print("  c01 compile            # 表のコンパイル（まだなら）")
+    print("  ibus write-cache       # 登録の一覧を作り直す")
     print("  ibus restart           # ibus を再起動")
+    print("  ibus list-engine | grep c01   # 出れば登録できている")
     print("そのあと 設定 → キーボード → 入力ソース → ＋ → 日本語 の中の C01 を追加してください")
     return 0
 
@@ -171,11 +201,19 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("try", help="変換の候補を確かめる")
     s.add_argument("keys", nargs="*", help="打鍵列（スペース区切りで複数）")
     s.add_argument("-m", "--mode", choices=[m.value for m in MODE_ORDER], help="モード（既定は設定のもの）")
+    s.add_argument("-t", "--tail", choices=["hiragana", "katakana"], help="尾辞の表（既定は設定のもの）")
     s.add_argument("-n", "--limit", type=int, default=12, help="表示する候補の最大数")
     s.set_defaults(func=cmd_try)
 
     s = sub.add_parser("list", help="選べる表の一覧")
     s.set_defaults(func=cmd_list)
+
+    s = sub.add_parser("kana", help="テキストの平仮名を片仮名に変える（標準入力→標準出力）")
+    s.add_argument("files", nargs="*", help="ファイル（省略すると標準入力）")
+    s.add_argument("-r", "--reverse", action="store_true", help="片仮名を平仮名に変える")
+    s.add_argument("-i", "--in-place", action="store_true", help="ファイルを書き換える")
+    s.add_argument("-o", "--output", help="出力先のファイル（ファイルが1つのとき）")
+    s.set_defaults(func=cmd_kana)
 
     s = sub.add_parser("import-cangjie", help="Cangjie5*.txt をCSVに変換する")
     s.add_argument("src", help="Cangjie5.txt のパス")
@@ -185,7 +223,7 @@ def build_parser() -> argparse.ArgumentParser:
     s.set_defaults(func=cmd_import_cangjie)
 
     s = sub.add_parser("install-ibus", help="ibus に登録する")
-    s.add_argument("--system", action="store_true", help="/usr/share/ibus/component に入れる（sudo が必要）")
+    s.add_argument("--user", action="store_true", help="~/.local/share/ibus/component に入れる（ibus が読まない場合が多い）")
     s.add_argument("--print-only", action="store_true", help="書かずに内容だけ表示する")
     s.set_defaults(func=cmd_install_ibus)
     return p

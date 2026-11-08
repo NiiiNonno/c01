@@ -28,7 +28,7 @@ def user_hira_rows():
         for v, k in zip(VOWELS, kana):
             rows.append((cons + v, k, ""))
     rows += [("ya", "や", ""), ("yu", "ゆ", ""), ("yo", "よ", ""), ("wa", "わ", ""), ("wo", "を", "")]
-    rows += [("n'", "ん", ""), ("n", "ん", ""), ("-", "ー", "")]
+    rows += [("n'", "ん", ""), ("n", "ん", "")]
     rows += [("lya", "ゃ", ""), ("lyu", "ゅ", ""), ("lyo", "ょ", ""), ("ltu", "っ", "")]
     rows += [(c + c, "っ", c) for c in "ksptgzdbf"]
     return rows
@@ -39,6 +39,7 @@ def user_kata_rows():
         return "".join(chr(ord(c) + 0x60) if "ぁ" <= c <= "ゖ" else c for c in s)
 
     rows = [(k, to_kata(o), n) for k, o, n in user_hira_rows()]
+    rows.append(("-", "ー", ""))  # 長音は片仮名用だけ
     for pre, base in (("ky", "き"), ("sy", "し"), ("ty", "ち"), ("ny", "に"), ("fy", "ひ"), ("my", "み"), ("ry", "り")):
         for v, small in (("a", "ゃ"), ("u", "ゅ"), ("o", "ょ")):
             rows.append((pre + v, to_kata(base + small), ""))
@@ -58,8 +59,9 @@ def user_data(tmp_path_factory) -> Path:
     d = tmp_path_factory.mktemp("c01data")
     write_csv(d / "romaji/user/hiragana.csv", user_hira_rows(), "# テスト用")
     write_csv(d / "romaji/user/katakana.csv", user_kata_rows(), "# テスト用")
-    # 法(egi)は えぎ とも読めるので、漢字を先に出したいものとして挙げる
-    write_csv(d / "priority/user.csv", [("日",), ("山",), ("水",), ("人",), ("法",)], "# テスト用")
+    # 首辞となる平仮名のリスト（は・の・で だけ。ほかの仮名は z で選ぶ）
+    (d / "compound").mkdir(parents=True, exist_ok=True)
+    (d / "compound/user_kana.txt").write_text("# テスト用\nは\nの\nで\n", encoding="utf-8")
     return d
 
 
@@ -73,7 +75,7 @@ def isolated_dirs(tmp_path, monkeypatch, user_data):
 
 @pytest.fixture(scope="session")
 def user_cfg() -> Config:
-    return Config(romaji="user", mode="hanwa_hira")
+    return Config(romaji="user", compound=["user_kana"])
 
 
 def _compile_with_data(cfg: Config, data_dir: Path):
@@ -94,16 +96,6 @@ def _compile_with_data(cfg: Config, data_dir: Path):
 @pytest.fixture(scope="session")
 def user_compiled(user_cfg, user_data):
     return _compile_with_data(user_cfg, user_data)
-
-
-@pytest.fixture(scope="session")
-def user_cfg_prio() -> Config:
-    return Config(romaji="user", kanji_priority="user", mode="hanwa_hira")
-
-
-@pytest.fixture(scope="session")
-def user_compiled_prio(user_cfg_prio, user_data):
-    return _compile_with_data(user_cfg_prio, user_data)
 
 
 @pytest.fixture(scope="session")

@@ -70,7 +70,7 @@ class Shared:
         self.config_path = default_config_path()
         self.cfg: Config = Config()
         self.compiled: Compiled | None = None
-        self.mode = Mode.HANWA_HIRA
+        self.mode = Mode.HANWA
         self._cfg_mtime = None
         self.error: str = ""
         self.refresh(force=True)

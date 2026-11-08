@@ -8,6 +8,7 @@ from c01.tables import (
     TableError,
     compile_tables,
     current_fingerprint,
+    expand_wildcards,
     load_cangjie,
     load_or_compile,
     load_romaji,
@@ -48,71 +49,182 @@ def test_cangjie_order_dedupe_and_first(tmp_path):
     assert t["a"] == ["甲", "日", "曰", "乙"]
 
 
-def test_bundled_cangjie_has_expected_codes(hepburn_compiled):
-    cj = hepburn_compiled.cangjie
-    assert cj["hdi"][0] == "私"
-    assert cj["oiar"][0] == "倉"
-    assert cj["a"][0] == "日"
-    assert "々" in cj["ko"] and "ヶ" in cj["kh"]  # 追加表の分
-    assert not any(code.startswith("z") for code in cj)  # 特殊コードは除いてある
+def test_bundled_tables_have_expected_codes(hepburn_compiled):
+    h = hepburn_compiled.heads
+    assert h["hdi"][0] == "私"
+    assert h["oiar"][0] == "倉"
+    assert h["a"][0] == "日"
+    assert "々" in h["ko"] and "ヶ" in h["kh"]  # 追加表の分
+    assert not any(code.startswith("z") for code in h)  # 特殊コードは除いてある
 
 
 def test_symbol_keys_overlapping_input_keys_are_dropped(hepburn_compiled):
-    # '-' や ' など、打鍵に使う文字は記号テーブルに書いても無視される
+    # '-' や z など、打鍵に使う文字は記号テーブルに書いても無視される
     assert "," in hepburn_compiled.symbols
     assert "-" not in hepburn_compiled.symbols
+    assert "z" in hepburn_compiled.buffer_chars and "-" in hepburn_compiled.buffer_chars
+
+
+def test_bundled_compound_lists_compile_without_warnings(hepburn_compiled):
+    assert hepburn_compiled.warnings == []
+    texts = {e[0] for entries in hepburn_compiled.compound.values() for e in entries}
+    assert {"倉頡", "去る", "去っ", "真ん中", "ラ行", "その他", "による", "によって"} <= texts
+
+
+# ---- ワイルドカード ------------------------------------------------------
+
+WC = {"る": "らりるれろっ", "む": "まみむめもん", "ぬ": "なにぬねのん"}
+
+
+def test_wildcard_expansion():
+    out, had, missing = expand_wildcards("去る*", WC)
+    assert out == ["去ら", "去り", "去る", "去れ", "去ろ", "去っ"] and had and not missing
+    out, _, _ = expand_wildcards("読む*", WC)
+    assert "読ん" in out and "読め" in out
+    out, _, _ = expand_wildcards("死ぬ*", WC)
+    assert "死ん" in out
+
+
+def test_wildcard_plain_and_missing():
+    assert expand_wildcards("必ず", WC) == (["必ず"], False, [])
+    out, had, missing = expand_wildcards("去ふ*", WC)
+    assert out == ["去ふ"] and had and missing == ["ふ"]
+
+
+def test_bundled_wildcards_cover_stated_rows():
+    from c01.config import find_data
+    from c01.tables import load_pairs
+
+    wc = load_pairs(find_data("wildcards/default.csv"))
+    assert set("らりるれろっ") <= set(wc["る"])
+    assert "ん" in wc["む"] and "ん" in wc["ぬ"]
+    assert set("わゐうゑを") <= set(wc["ふ"])  # ふ* は わ行 を含む
+    assert set("わゐ𛄟ゑを") <= set(wc["𛄟"])  # わ行 は 𛄟*
 
 
 # ---- 字種の絞り込み ------------------------------------------------------
 
-def test_script_filter_with_variants(tmp_path, monkeypatch):
+def _mini(tmp_path, monkeypatch, **extra):
     monkeypatch.setenv("C01_DATA_DIR", str(tmp_path))
-    # 日・曰 は共通、「倉」を繁体字扱いにしてみる
-    write_csv(tmp_path / "variants/t.csv", [("倉", "trad"), ("仓", "simp")])
     write_csv(tmp_path / "cangjie/mini.csv", [("日", "a"), ("倉", "oiar"), ("仓", "oiar")])
-    cfg = Config(cangjie="mini", cangjie_extra=[], variants="t", script="trad")
+    return Config(head=["mini"], compound=[], **extra)
+
+
+def test_script_filter_with_variants(tmp_path, monkeypatch):
+    # 「倉」を繁体字扱い、「仓」を簡体字扱いにしてみる
+    write_csv(tmp_path / "variants/t.csv", [("倉", "trad"), ("仓", "simp")])
+    cfg = _mini(tmp_path, monkeypatch, variants="t", script="trad")
     c = compile_tables(cfg)
-    assert c.cangjie["oiar"] == ("倉",)
-    assert c.cangjie["a"] == ("日",)
+    assert c.heads["oiar"] == ("倉",) and c.heads["a"] == ("日",)
     cfg.script = "simp"
-    assert compile_tables(cfg).cangjie["oiar"] == ("仓",)
+    assert compile_tables(cfg).heads["oiar"] == ("仓",)
     cfg.script = "all"
-    assert compile_tables(cfg).cangjie["oiar"] == ("倉", "仓")
+    assert compile_tables(cfg).heads["oiar"] == ("倉", "仓")
+
+
+def test_script_filter_also_filters_compound_entries(tmp_path, monkeypatch):
+    write_csv(tmp_path / "variants/t.csv", [("倉", "trad"), ("仓", "simp")])
+    cfg = _mini(tmp_path, monkeypatch, variants="t", script="simp")
+    (tmp_path / "compound").mkdir()
+    (tmp_path / "compound/j.txt").write_text("倉日\n仓日\n", encoding="utf-8")
+    cfg.compound = ["j"]
+    c = compile_tables(cfg)
+    assert [e[0] for e in c.compound["oiara"]] == ["仓日"]
 
 
 def test_script_without_variants_warns_and_keeps_all():
     c = compile_tables(Config(script="trad"))
     assert any("variants" in w for w in c.warnings)
-    assert "倉" in c.cangjie["oiar"]
+    assert "倉" in c.heads["oiar"]
 
 
 # ---- コンパイルのキャッシュ ------------------------------------------------
 
 def test_compile_cache_reused_and_invalidated(tmp_path, monkeypatch):
-    monkeypatch.setenv("C01_DATA_DIR", str(tmp_path))
-    write_csv(tmp_path / "cangjie/mini.csv", [("日", "a")])
-    cfg = Config(cangjie="mini", cangjie_extra=[])
+    cfg = _mini(tmp_path, monkeypatch)
     c1 = load_or_compile(cfg)
     assert c1.fingerprint == current_fingerprint(cfg)
     assert load_or_compile(cfg).fingerprint == c1.fingerprint
     write_csv(tmp_path / "cangjie/mini.csv", [("日", "a"), ("月", "b")])  # サイズが変わる
     assert current_fingerprint(cfg) != c1.fingerprint
-    assert load_or_compile(cfg).cangjie["b"] == ("月",)
+    assert load_or_compile(cfg).heads["b"] == ("月",)
+
+
+def test_compound_list_change_invalidates_cache(tmp_path, monkeypatch):
+    cfg = _mini(tmp_path, monkeypatch)
+    (tmp_path / "compound").mkdir()
+    (tmp_path / "compound/j.txt").write_text("倉日\n", encoding="utf-8")
+    cfg.compound = ["j"]
+    fp = current_fingerprint(cfg)
+    (tmp_path / "compound/j.txt").write_text("倉日\n日日\n", encoding="utf-8")
+    assert current_fingerprint(cfg) != fp
 
 
 def test_user_table_overrides_bundled(tmp_path, monkeypatch):
     monkeypatch.setenv("C01_DATA_DIR", str(tmp_path))
     write_csv(tmp_path / "cangjie/custom.csv", [("々", "xyz")])  # 同梱の custom.csv を置き換える
     c = compile_tables(Config())
-    assert "々" in c.cangjie["xyz"]
-    assert "々" not in c.cangjie.get("ko", ())  # 同梱の割り当ては使われない
+    assert c.heads["xyz"] == ("々",)
+    assert "々" not in c.heads.get("ko", ())  # 同梱の割り当ては使われない
+
+
+def test_compound_priority_follows_list_order(tmp_path, monkeypatch):
+    cfg = _mini(tmp_path, monkeypatch)
+    (tmp_path / "compound").mkdir()
+    (tmp_path / "compound/x.txt").write_text("倉\n", encoding="utf-8")
+    (tmp_path / "compound/y.txt").write_text("仓\n", encoding="utf-8")
+    cfg.compound = ["x", "y"]
+    assert [e[0] for e in compile_tables(cfg).compound["oiar"]] == ["倉", "仓"]
+    cfg.compound = ["y", "x"]
+    assert [e[0] for e in compile_tables(cfg).compound["oiar"]] == ["仓", "倉"]
+
+
+def test_head_priority_follows_list_order(tmp_path, monkeypatch):
+    monkeypatch.setenv("C01_DATA_DIR", str(tmp_path))
+    write_csv(tmp_path / "cangjie/p.csv", [("日", "a")])
+    write_csv(tmp_path / "cangjie/q.csv", [("曰", "a")])
+    assert compile_tables(Config(head=["p", "q"], compound=[])).heads["a"] == ("日", "曰")
+    assert compile_tables(Config(head=["q", "p"], compound=[])).heads["a"] == ("曰", "日")
+
+
+def test_unmakeable_entries_warn_and_are_skipped(tmp_path, monkeypatch):
+    cfg = _mini(tmp_path, monkeypatch)
+    (tmp_path / "compound").mkdir()
+    (tmp_path / "compound/j.txt").write_text("日月\n日\n", encoding="utf-8")  # 月 は表に無い
+    cfg.compound = ["j"]
+    c = compile_tables(cfg)
+    assert [e[0] for e in c.compound["a"]] == ["日"]
+    assert any("日月" in w for w in c.warnings)
 
 
 # ---- 設定 --------------------------------------------------------------
 
 def test_config_defaults_when_file_missing():
     cfg = load_config()
-    assert cfg.mode == "hanwa_hira" and cfg.romaji == "hepburn"
+    assert cfg.mode == "hanwa" and cfg.romaji == "hepburn" and cfg.tail == "hiragana"
+    assert cfg.head == ["cangjie5", "custom"]
+    assert cfg.compound == ["jukugo", "okurigana", "kana_head"]
+
+
+def test_config_hiragana_and_katakana_schemes_are_independent(tmp_path):
+    p = tmp_path / "c.toml"
+    p.write_text('romaji = "a"\nkatakana = "b"\n', encoding="utf-8")
+    cfg = load_config(p)
+    assert (cfg.hiragana_scheme, cfg.katakana_scheme) == ("a", "b")
+
+
+def test_config_migrates_old_keys(tmp_path):
+    p = tmp_path / "c.toml"
+    p.write_text(
+        'mode = "hanwa_kata"\ncangjie = "cangjie5"\ncangjie_extra = ["custom"]\n'
+        'kanji_priority = "default"\nhira2kata = "default"\n',
+        encoding="utf-8",
+    )
+    cfg = load_config(p)
+    assert (cfg.mode, cfg.tail) == ("hanwa", "katakana")
+    assert cfg.head == ["cangjie5", "custom"]
+    assert len(cfg.notes) == 4
+    assert compile_tables(cfg).warnings[:4] == cfg.notes  # 注意は、コンパイルの結果にも出る
 
 
 def test_config_reads_toml(tmp_path):
@@ -122,7 +234,9 @@ def test_config_reads_toml(tmp_path):
     assert (cfg.mode, cfg.page_size, cfg.error_sound) == ("kanji", 5, "/x/e.wav")
 
 
-@pytest.mark.parametrize("body", ['mode = "nope"', "page_size = 0", 'script = "x"', "zzz = 1", "= broken"])
+@pytest.mark.parametrize(
+    "body", ['mode = "nope"', 'tail = "x"', "head = []", "page_size = 0", 'script = "x"', "zzz = 1", "= broken"]
+)
 def test_config_rejects_bad_values(tmp_path, body):
     p = tmp_path / "c.toml"
     p.write_text(body + "\n", encoding="utf-8")

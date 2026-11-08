@@ -1,4 +1,4 @@
-"""設定ファイル（TOML）とデータの置き場所の解決。"""
+"""設定ファイル（TOML）とデータ置き場の解決。"""
 
 from __future__ import annotations
 
@@ -10,8 +10,17 @@ from pathlib import Path
 PKG_DIR = Path(__file__).resolve().parent
 BUNDLED_DATA = PKG_DIR / "data"
 
-MODE_NAMES = ("direct", "kanji", "hanwa_hira", "hanwa_kata")
+MODE_NAMES = ("direct", "kanji", "hanwa")
+TAIL_NAMES = ("hiragana", "katakana")
 SCRIPT_NAMES = ("all", "trad", "simp", "shin")
+
+# 古い設定の読み替え
+LEGACY_MODES = {"hanwa_hira": ("hanwa", "hiragana"), "hanwa_kata": ("hanwa", "katakana")}
+# 廃止した項目（書いてあっても無視する）
+OBSOLETE_KEYS = {
+    "kanji_priority": "漢字優先リストは廃止しました（compound の首辞リストで指定します）",
+    "hira2kata": "hira2kata は廃止しました（和漢混淆（片）は tail = \"katakana\" で行います）",
+}
 
 
 def _env_dir(env: str, xdg_env: str, xdg_default: str) -> Path:
@@ -44,20 +53,23 @@ class ConfigError(Exception):
 
 @dataclass
 class Config:
-    # 起動時のモード: direct / kanji / hanwa_hira / hanwa_kata
-    mode: str = "hanwa_hira"
-    # data/romaji/<名前>/ の下の hiragana.csv と katakana.csv
-    romaji: str = "max"
+    # 起動時のモード: direct（直接入力）/ kanji（漢字のみ）/ hanwa（和漢混淆）
+    mode: str = "hanwa"
+    # ローマ字の方式。data/romaji/<名前>/ の下の hiragana.csv と katakana.csv を使う
+    romaji: str = "min"
+    # 平仮名表・片仮名表を別々の方式から選ぶとき（空なら romaji と同じ）
+    hiragana: str = ""
+    katakana: str = ""
+    # 尾辞（首辞のあとに続く仮名）に使う表: hiragana / katakana（katakana が「和漢混淆（片）」）
+    tail: str = "hiragana"
+    # 首辞になる字の表: data/cangjie/<名前>.csv（倉頡表・追加字）。左から順に優先される
+    head: list[str] = field(default_factory=lambda: ["cangjie5", "custom"])
+    # 複合首辞のリスト: data/compound/<名前>.txt（熟語・送り仮名・首辞となる仮名）。左から順に優先される
+    compound: list[str] = field(default_factory=lambda: ["jukugo", "okurigana", "kana_head"])
+    # ワイルドカード（る* など）の展開表: data/wildcards/<名前>.csv
+    wildcards: str = "default"
     # data/symbols/<名前>.csv
     symbols: str = "default"
-    # data/cangjie/<名前>.csv  （倉頡の本体。上から順が優先順位）
-    cangjie: str = "cangjie5"
-    # 倉頡に足す追加表（data/cangjie/<名前>.csv）。「々」「ヶ」など
-    cangjie_extra: list[str] = field(default_factory=lambda: ["custom"])
-    # 仮名より先に出す漢字の一覧: data/priority/<名前>.csv
-    kanji_priority: str = "default"
-    # 和漢混淆（片）で使う、平仮名→片仮名の置き換え表: data/hira2kata/<名前>.csv
-    hira2kata: str = "default"
     # 文字の分類表（繁体・簡体・新字体の判定用）: data/variants/<名前>.csv。空なら未使用
     variants: str = ""
     # all / trad / simp / shin
@@ -67,20 +79,34 @@ class Config:
     preedit_map: str = "cangjie5"
     # エラー音の音声ファイル（空なら鳴らさない）
     error_sound: str = ""
-    # 候補の1ページの件数（数字キー 0〜9 で選ぶので 10 のまま推奨）
+    # 候補窓の1ページの件数（数字キー 0〜9 で選ぶので 10 まで）
     page_size: int = 10
-    # 「漢字＋仮名」の分割候補で、1つの倉頡コードにつき出す漢字の最大数
+    # 首辞の後ろに尾辞が続く候補で、1つの打鍵長につき出す字の最大数（全体が1字で読める候補には効かない）
     max_split_kanji: int = 3
-    # モード切り替えキー（順に direct → kanji → hanwa_hira → hanwa_kata → …）
+    # モードを順に切り替えるキー
     mode_keys: list[str] = field(default_factory=lambda: ["ctrl+shift+m"])
+    # 読み込み時の注意（設定ファイルの項目ではない）
+    notes: list[str] = field(default_factory=list, metadata={"internal": True})
+
+    @property
+    def hiragana_scheme(self) -> str:
+        return self.hiragana or self.romaji
+
+    @property
+    def katakana_scheme(self) -> str:
+        return self.katakana or self.romaji
 
     def validate(self) -> None:
         if self.mode not in MODE_NAMES:
             raise ConfigError(f"mode は {MODE_NAMES} のどれか: {self.mode!r}")
+        if self.tail not in TAIL_NAMES:
+            raise ConfigError(f"tail は {TAIL_NAMES} のどれか: {self.tail!r}")
         if self.script not in SCRIPT_NAMES:
             raise ConfigError(f"script は {SCRIPT_NAMES} のどれか: {self.script!r}")
         if self.preedit not in ("latin", "map"):
             raise ConfigError(f"preedit は latin か map: {self.preedit!r}")
+        if not self.head:
+            raise ConfigError("head には表を1つ以上書いてください")
         if not 1 <= self.page_size <= 10:
             raise ConfigError("page_size は 1〜10")
         if self.max_split_kanji < 1:
@@ -96,7 +122,8 @@ def load_config(path: str | os.PathLike | None = None) -> Config:
                 raw = tomllib.load(f)
         except tomllib.TOMLDecodeError as e:
             raise ConfigError(f"{p}: {e}") from e
-        known = {f.name for f in fields(Config)}
+        raw = _migrate(raw, cfg)
+        known = {f.name for f in fields(Config) if not f.metadata.get("internal")}
         unknown = set(raw) - known
         if unknown:
             raise ConfigError(f"{p}: 未知の設定項目 {sorted(unknown)}（使えるのは {sorted(known)}）")
@@ -106,8 +133,26 @@ def load_config(path: str | os.PathLike | None = None) -> Config:
     return cfg
 
 
+def _migrate(raw: dict, cfg: Config) -> dict:
+    """古い設定の書き方を新しいものに読み替える。"""
+    raw = dict(raw)
+    for key, why in OBSOLETE_KEYS.items():
+        if key in raw:
+            del raw[key]
+            cfg.notes.append(why)
+    if raw.get("mode") in LEGACY_MODES:
+        raw["mode"], tail = LEGACY_MODES[raw["mode"]]
+        raw.setdefault("tail", tail)
+        cfg.notes.append("mode の hanwa_hira / hanwa_kata は hanwa + tail に読み替えました")
+    if "cangjie" in raw or "cangjie_extra" in raw:
+        names = [raw.pop("cangjie", "cangjie5")] + list(raw.pop("cangjie_extra", []))
+        raw.setdefault("head", names)
+        cfg.notes.append("cangjie / cangjie_extra は head に読み替えました")
+    return raw
+
+
 def find_data(rel: str) -> Path:
-    """利用者のデータ置き場を先に、なければ同梱データから探す。"""
+    """利用者のデータ置き場を先に、なければ同梱のデータから探す。"""
     tried = []
     for root in (user_data_dir(), BUNDLED_DATA):
         p = root / rel
@@ -118,7 +163,7 @@ def find_data(rel: str) -> Path:
 
 
 def list_choices(subdir: str) -> list[str]:
-    """設定で選べる名前の一覧（同梱＋利用者追加）。"""
+    """設定で選べる名前の一覧（同名は1つ。利用者の分も入る）。"""
     names: set[str] = set()
     for root in (user_data_dir(), BUNDLED_DATA):
         d = root / subdir
@@ -127,6 +172,6 @@ def list_choices(subdir: str) -> list[str]:
         for e in d.iterdir():
             if e.is_dir():
                 names.add(e.name)
-            elif e.suffix == ".csv":
+            elif e.suffix in (".csv", ".txt") and e.stem.lower() != "readme":
                 names.add(e.stem)
     return sorted(names)

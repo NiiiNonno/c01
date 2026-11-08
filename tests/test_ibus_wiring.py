@@ -142,7 +142,8 @@ def type_keys(eng, keys):
 def test_typing_shows_preedit_and_candidates(engine):
     type_keys(engine, "ai")
     assert engine.preedit == ("ai", True)
-    assert engine.table.cands[:2] == ["あい", "旷"]
+    assert engine.table.cands[:2] == ["旷", "𮲜"]
+    assert engine.table.cands[-1] == "あい"  # 空首辞（尾辞だけ）は最下位
     assert engine.table.labels[0] == "0" and engine.lookup_visible
     assert engine.aux[1] is True and engine.aux[0].startswith("[和]")
 
@@ -154,11 +155,12 @@ def test_space_commits_and_clears(engine):
 
 
 def test_down_arrow_moves_cursor_then_space(engine):
-    type_keys(engine, "a")
+    type_keys(engine, "ni")
+    assert engine.table.cands[:2] == ["に", "夕"]
     press(engine, "Down")
     assert engine.table.cursor == 1
     press(engine, "space")
-    assert engine.committed == ["あ"]
+    assert engine.committed == ["夕"]
 
 
 def test_x11_alias_for_page_up_is_consumed_while_composing(engine):
@@ -201,18 +203,27 @@ def test_focus_out_drops_unfinished_input(engine):
 
 
 def test_candidate_click_commits_by_page_position(engine):
-    type_keys(engine, "a")
+    type_keys(engine, "ni")
     engine.do_candidate_clicked(1, 1, 0)
-    assert engine.committed == ["あ"]
+    assert engine.committed == ["夕"]
 
 
 def test_mode_property_cycles_mode(engine):
     from c01.core import MODE_LABELS, Mode
 
-    engine.do_property_activate("mode", 0)  # 和漢混淆(平) → 和漢混淆(片)
-    type_keys(engine, "a")
-    assert engine.aux[0].startswith(f"[{MODE_LABELS[Mode.HANWA_KATA]}]")
-    assert engine.table.cands[:2] == ["日", "ア"]
+    engine.do_property_activate("mode", 0)  # 和漢混淆 → 直接入力
+    assert press(engine, "a") is False  # 直接入力ではキーをアプリに返す
+    engine.do_property_activate("mode", 0)  # → 漢字のみ
+    type_keys(engine, "giru")
+    assert engine.aux[0].startswith(f"[{MODE_LABELS[Mode.KANJI]}]")
+    assert engine.table is None  # 漢字のみでは 去る（仮名を含む）は出ない
+
+
+def test_z_selects_kana_in_engine(engine):
+    type_keys(engine, "kanaz")
+    assert engine.table.cands == ["かな", "カナ"]
+    press(engine, "space")
+    assert engine.committed == ["かな"]
 
 
 def test_exception_does_not_stop_typing(engine, monkeypatch):

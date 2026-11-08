@@ -7,7 +7,7 @@ from c01.core import Mode
 from c01.session import Key, Session
 
 
-def make(compiled, mode=Mode.HANWA_HIRA, **cfg):
+def make(compiled, mode=Mode.HANWA, **cfg):
     return Session(compiled, Config(**cfg), mode)
 
 
@@ -36,22 +36,22 @@ def test_space_commits_first_candidate(s):
 
 
 def test_second_candidate_by_down_arrow_then_space(s):
-    typed(s, "a")
-    assert s.cands[:2] == ["日", "あ"]
+    typed(s, "ni")
+    assert s.cands[:2] == ["に", "夕"]
     press(s, "Down")
     assert s.cursor == 1
-    assert press(s, "space").commit == "あ"
+    assert press(s, "space").commit == "夕"
 
 
 def test_digit_selects_on_current_page(s):
-    typed(s, "a")
+    typed(s, "ni")
     r = s.handle(Key(char="1"))
-    assert r.commit == "あ"
+    assert r.commit == "夕"
 
 
 def test_digit_zero_is_first_of_page_like_space(s):
-    typed(s, "a")
-    assert s.handle(Key(char="0")).commit == "日"
+    typed(s, "ni")
+    assert s.handle(Key(char="0")).commit == "に"
 
 
 def test_digit_out_of_range_is_error(s):
@@ -104,10 +104,10 @@ def test_unknown_char_when_empty_goes_to_app(s):
 
 
 def test_backspace_edits_buffer_and_recomputes(s):
-    typed(s, "ai")
-    assert s.cands[0] == "あい"
+    typed(s, "ni")
+    assert s.cands[0] == "に"
     press(s, "BackSpace")
-    assert s.buf == "a" and s.cands[0] == "日"
+    assert s.buf == "n" and s.cands[0] == "弓"
     press(s, "BackSpace")
     assert s.buf == "" and s.cands == []
     assert not press(s, "BackSpace").handled  # 空なら、アプリのBackSpaceに任せる
@@ -129,7 +129,7 @@ def test_return_when_empty_goes_to_app(s):
 
 
 def test_arrow_wraps_around(s):
-    typed(s, "a")
+    typed(s, "ni")
     n = len(s.cands)
     press(s, "Up")
     assert s.cursor == n - 1
@@ -139,7 +139,7 @@ def test_arrow_wraps_around(s):
 
 def test_paging(hepburn_compiled):
     s = make(hepburn_compiled, page_size=2)
-    typed(s, "giru")  # ['ぎる', '坮う', '去る', '圹る', '圡る', '土いる']
+    typed(s, "giru")  # ['去る', '坮う', '圹る', '圡る', '土いる', 'ぎる']
     assert len(s.cands) == 6
     press(s, "Page_Down")
     assert s.cursor == 2 and s.page_start == 2
@@ -178,15 +178,31 @@ def test_mode_key_cycles_and_clears(hepburn_compiled):
     s = make(hepburn_compiled)
     typed(s, "hdi")
     r = s.handle(Key(char="M", ctrl=True, shift=True))
-    assert r.handled and s.mode is Mode.HANWA_KATA and s.buf == ""
+    assert r.handled and s.mode is Mode.DIRECT and s.buf == ""
     s.handle(Key(char="M", ctrl=True, shift=True))
-    assert s.mode is Mode.DIRECT
+    assert s.mode is Mode.KANJI
+    s.handle(Key(char="M", ctrl=True, shift=True))
+    assert s.mode is Mode.HANWA
 
 
-def test_hyphen_starts_katakana_word(s):
-    typed(s, "-katakana")
-    assert s.cands == ["カタカナ"]
-    assert press(s, "space").commit == "カタカナ"
+def test_kanji_mode_has_no_kana_candidates(hepburn_compiled):
+    s = make(hepburn_compiled, Mode.KANJI)
+    typed(s, "giru")
+    assert s.cands == []
+    assert press(s, "space").error
+
+
+def test_z_selects_kana(s):
+    typed(s, "kanaz")
+    assert s.cands == ["かな", "カナ"]
+    assert s.handle(Key(char="1")).commit == "カナ"
+    typed(s, "kanaz")
+    assert press(s, "space").commit == "かな"
+
+
+def test_z_katakana_word_with_long_vowel(s):
+    typed(s, "yu-za-z")
+    assert press(s, "space").commit == "ユーザー"
 
 
 def test_preedit_latin_and_map(hepburn_compiled):
@@ -195,13 +211,13 @@ def test_preedit_latin_and_map(hepburn_compiled):
     assert s.preedit == "hdi"
     from c01.tables import compile_tables
 
-    s2 = Session(compile_tables(Config(preedit="map")), Config(preedit="map"), Mode.HANWA_HIRA)
+    s2 = Session(compile_tables(Config(preedit="map")), Config(preedit="map"), Mode.HANWA)
     typed(s2, "hdi")
     assert s2.preedit == "竹木戈"
 
 
 def test_select_index(s):
-    typed(s, "a")
-    assert s.select_index(1).commit == "あ"
-    typed(s, "a")
+    typed(s, "ni")
+    assert s.select_index(1).commit == "夕"
+    typed(s, "ni")
     assert s.select_index(99).error
