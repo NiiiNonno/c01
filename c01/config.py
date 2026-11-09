@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-import re
 import tomllib
 from dataclasses import dataclass, field, fields
 from pathlib import Path
@@ -13,15 +12,6 @@ BUNDLED_DATA = PKG_DIR / "data"
 
 MODE_NAMES = ("direct", "kanji", "hanwa")
 SCRIPT_NAMES = ("all", "trad", "simp", "shin")
-
-# 古い設定の読み替え
-LEGACY_MODES = {"hanwa_hira": ("hanwa", "hiragana"), "hanwa_kata": ("hanwa", "katakana")}
-# 廃止した項目（書いてあっても無視する）
-OBSOLETE_KEYS = {
-    "kanji_priority": "漢字優先リストは廃止しました（compound の首辞リストで指定します）",
-    "hira2kata": "hira2kata は廃止しました（和漢混淆（片）は tail に片仮名の表を選んで行います）",
-}
-
 
 def _env_dir(env: str, xdg_env: str, xdg_default: str) -> Path:
     if os.environ.get(env):
@@ -59,13 +49,11 @@ class Config:
     head: list[str] = field(default_factory=lambda: ["cangjie5", "custom"])
     # tail: 尾辞（首辞のあとに続く仮名）の表（data/tail/<名前>.csv）。
     #   平仮名の表なら和漢混淆、片仮名の表なら和漢混淆（片）になる
-    tail: str = "hiragana-hepburn"
+    tail: str = "hiragana-min"
     # pure: 単独で構成するもの（data/pure/<名前>.csv）。片仮名など。いつも最低優先度の候補として並行して変換される
-    pure: list[str] = field(default_factory=lambda: ["katakana-hepburn"])
-    # compound: 複合首辞のリスト（data/compound/<名前>.txt）。熟語・送り仮名・首辞となる仮名。左から順に優先される
-    compound: list[str] = field(default_factory=lambda: ["jukugo", "okurigana", "kana_head"])
-    # ワイルドカード（る* など）の展開表: data/wildcards/<名前>.csv
-    wildcards: str = "default"
+    pure: list[str] = field(default_factory=lambda: ["katakana-min"])
+    # compound: 複合首辞のリスト（data/compound/<名前>.txt。セクション形式）。熟語・活用語・助詞つきの語・首辞となる仮名。左から順に優先される
+    compound: list[str] = field(default_factory=lambda: ["default", "jukugo"])
     # data/symbols/<名前>.csv
     symbols: str = "default"
     # 文字の分類表（繁体・簡体・新字体の判定用）: data/variants/<名前>.csv。空なら未使用
@@ -112,7 +100,6 @@ def load_config(path: str | os.PathLike | None = None) -> Config:
                 raw = tomllib.load(f)
         except tomllib.TOMLDecodeError as e:
             raise ConfigError(f"{p}: {e}") from e
-        raw = _migrate(raw, cfg)
         known = {f.name for f in fields(Config) if not f.metadata.get("internal")}
         unknown = set(raw) - known
         if unknown:
@@ -123,60 +110,11 @@ def load_config(path: str | os.PathLike | None = None) -> Config:
     return cfg
 
 
-def _migrate(raw: dict, cfg: Config) -> dict:
-    """古い設定の書き方を新しいものに読み替える。"""
-    raw = dict(raw)
-    for key, why in OBSOLETE_KEYS.items():
-        if key in raw:
-            del raw[key]
-            cfg.notes.append(why)
-    if raw.get("mode") in LEGACY_MODES:
-        raw["mode"], tail = LEGACY_MODES[raw["mode"]]
-        raw.setdefault("tail", tail)
-        cfg.notes.append("mode の hanwa_hira / hanwa_kata は hanwa + tail に読み替えました")
-    if "cangjie" in raw or "cangjie_extra" in raw:
-        names = [raw.pop("cangjie", "cangjie5")] + list(raw.pop("cangjie_extra", []))
-        raw.setdefault("head", names)
-        cfg.notes.append("cangjie / cangjie_extra は head に読み替えました")
-    # 仮名表: romaji / hiragana / katakana と、種類だけを書いた tail（hiragana / katakana）
-    old_tail = raw.get("tail") in ("hiragana", "katakana")
-    if any(k in raw for k in ("romaji", "hiragana", "katakana")) or old_tail:
-        romaji = raw.pop("romaji", "hepburn")
-        hira = raw.pop("hiragana", "") or romaji
-        kata = raw.pop("katakana", "") or romaji
-        kind = raw["tail"] if old_tail else "hiragana"
-        raw["tail"] = f"{kind}-{hira if kind == 'hiragana' else kata}"
-        raw.setdefault("pure", [f"katakana-{kata}"])
-        cfg.notes.append(
-            f"romaji / hiragana / katakana は tail = {raw['tail']!r}、pure = {raw['pure']!r} に読み替えました"
-        )
-    return raw
-
-
-# 新しい置き場所 → 古い置き場所（利用者が前の配置のまま持っている表も読めるように）
-_LEGACY = (
-    (re.compile(r"^head/(.+)$"), r"cangjie/\1"),
-    (re.compile(r"^tail/hiragana-(.+)\.csv$"), r"romaji/\1/hiragana.csv"),
-    (re.compile(r"^tail/katakana-(.+)\.csv$"), r"romaji/\1/katakana.csv"),
-    (re.compile(r"^pure/katakana-(.+)\.csv$"), r"romaji/\1/katakana.csv"),
-)
-
-
-def _legacy_paths(rel: str) -> list[str]:
-    return [pat.sub(repl, rel) for pat, repl in _LEGACY if pat.match(rel)]
-
-
 def find_data(rel: str) -> Path:
-    """利用者のデータ置き場を先に、なければ同梱のデータから探す。
-    それでも無ければ、古い配置（cangjie/ や romaji/<方式>/）の利用者の表を探す。"""
+    """利用者のデータ置き場を先に、なければ同梱のデータから探す。"""
     tried = []
     for root in (user_data_dir(), BUNDLED_DATA):
         p = root / rel
-        tried.append(str(p))
-        if p.exists():
-            return p
-    for old in _legacy_paths(rel):
-        p = user_data_dir() / old
         tried.append(str(p))
         if p.exists():
             return p

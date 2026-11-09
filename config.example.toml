@@ -14,12 +14,8 @@ tail = "hiragana-hepburn"
 # 単独で構成するもの（data/pure/<名前>.csv）。片仮名など。いつも最低優先度で並行変換される。z で絞り込める
 pure = ["katakana-hepburn"]
 
-# 複合首辞のリスト（data/compound/<名前>.txt）。熟語・送り仮名つきの語・首辞となる平仮名。左から順に優先される
-# 和漢混淆（片）にするときは、`c01 kana` で片仮名にしたリストを置いて、ここに加える
-compound = ["jukugo", "okurigana", "kana_head"]
-
-# ワイルドカード（る* など）の展開表（data/wildcards/<名前>.csv）
-wildcards = "default"
+# 複合首辞のリスト（data/compound/<名前>.txt。セクション形式）。熟語・活用語・助詞つきの語・首辞となる仮名。左から順に優先される
+compound = ["default"]
 
 # 記号の表（data/symbols/<名前>.csv）
 symbols = "default"

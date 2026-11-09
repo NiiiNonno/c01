@@ -88,7 +88,7 @@ def cmd_try(args) -> int:
 
 
 def cmd_list(args) -> int:
-    for sub in ("head", "tail", "pure", "compound", "wildcards", "symbols", "preedit", "variants"):
+    for sub in ("head", "tail", "pure", "compound", "symbols", "preedit", "variants"):
         names = list_choices(sub)
         print(f"{sub}: {', '.join(names) if names else '(なし)'}")
     print(f"利用者の表を置く場所: {user_data_dir()}")

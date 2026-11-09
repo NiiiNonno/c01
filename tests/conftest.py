@@ -62,7 +62,7 @@ def user_data(tmp_path_factory) -> Path:
     write_csv(d / "pure/katakana-user.csv", user_kata_rows(), "# テスト用")
     # 首辞となる平仮名のリスト（は・の・で だけ。ほかの仮名は z で選ぶ）
     (d / "compound").mkdir(parents=True, exist_ok=True)
-    (d / "compound/user_kana.txt").write_text("# テスト用\nは\nの\nで\n", encoding="utf-8")
+    (d / "compound/user_kana.txt").write_text("; テスト用\n[!仮名の首辞]\nは\nの\nで\n", encoding="utf-8")
     return d
 
 

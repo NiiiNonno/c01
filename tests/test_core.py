@@ -140,7 +140,7 @@ def test_small_tsu_before_kanji_needs_standalone_entry(tmp_path, monkeypatch):
     write_csv(tmp_path / "tail/mini.csv", [("ta", "た"), ("tt", "っ", "t"), ("to", "と")])
     write_csv(tmp_path / "head/mini.csv", [("真", "ab"), ("当", "cd")])
     (tmp_path / "compound").mkdir()
-    (tmp_path / "compound/m.txt").write_text("真っ当\n", encoding="utf-8")
+    (tmp_path / "compound/m.txt").write_text("[!x]\n真っ当\n", encoding="utf-8")
     cfg = Config(tail="mini", pure=[], head=["mini"], compound=["m"])
     c = compile_tables(cfg)
     assert c.compound == {}  # tt は「次の子音を残す」形なので、漢字の前には使えない

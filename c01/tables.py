@@ -5,8 +5,7 @@
   head/<名前>.csv                          : 文字, コード[, first]     （倉頡表・追加字。上の行ほど優先）
   tail/<名前>.csv                          : 入力, 出力[, 出力後に残す入力]   （尾辞の仮名表。平仮名なら和漢混淆、片仮名なら和漢混淆（片））
   pure/<名前>.csv                          : 入力, 出力[, 出力後に残す入力]   （単独で構成するもの。片仮名など。最低優先度で並行して変換）
-  compound/<名前>.txt                      : 1行に1項目（熟語・送り仮名・首辞となる仮名）。`る*` のような * が使える
-  wildcards/<名前>.csv                     : 文字, 展開（`る*` を らりるれろっ に広げる）
+  compound/<名前>.txt                      : セクション形式（sections.py）。[語群] を定義し、[!出力] の項目で (語群) を参照して広げる
   symbols/<名前>.csv                       : キー, 出力
   preedit/<名前>.csv                       : キー, 表示
   variants/<名前>.csv                      : 文字, 分類(common/trad/simp/shin)
@@ -31,10 +30,10 @@ from pathlib import Path
 
 from .config import Config, cache_dir, find_data
 from .kana import has_kana, parse_kana, script_of
+from .sections import SectionError, load_sections
 
-COMPILED_VERSION = 5
+COMPILED_VERSION = 6
 MAX_VARIANTS = 24  # 1つの項目から作る打鍵列の最大数
-MAX_WILDCARD = 256  # 1つの項目を * で広げる最大数
 
 
 class TableError(Exception):
@@ -101,48 +100,6 @@ def load_pairs(path: Path) -> dict[str, str]:
             raise TableError(f"{path}:{no}: 2列必要です")
         d[row[0]] = row[1]
     return d
-
-
-def load_compound(path: Path) -> list[tuple[int, str]]:
-    """(行番号, 項目) のリスト。1行に1項目で、カンマより後ろは読まない。"""
-    out = []
-    with open(path, encoding="utf-8-sig") as f:
-        for no, line in enumerate(f, start=1):
-            line = line.strip()
-            if not line or line.startswith("#"):
-                continue
-            text = line.split(",")[0].strip()
-            if text:
-                out.append((no, text))
-    return out
-
-
-# ---- ワイルドカード ------------------------------------------------------------
-
-def expand_wildcards(text: str, wc: dict[str, str]) -> tuple[list[str], bool, list[str]]:
-    """`る*` のような書き方を展開する。(展開した項目, * があったか, 展開表に無かった文字)"""
-    parts: list[list[str]] = []
-    missing: list[str] = []
-    had = False
-    i = 0
-    while i < len(text):
-        ch = text[i]
-        if i + 1 < len(text) and text[i + 1] == "*":
-            had = True
-            alts = wc.get(ch)
-            if alts is None:
-                missing.append(ch)
-                parts.append([ch])
-            else:
-                parts.append(list(dict.fromkeys(alts)))
-            i += 2
-        else:
-            parts.append([ch])
-            i += 1
-    out = []
-    for combo in itertools.islice(itertools.product(*parts), MAX_WILDCARD):
-        out.append("".join(combo))
-    return out, had, missing
 
 
 # ---- 文字列 → 打鍵列（逆変換） ------------------------------------------------------
@@ -285,7 +242,6 @@ def _source_files(cfg: Config) -> dict[str, Path]:
     files: dict[str, Path] = {
         "tail": find_data(f"tail/{cfg.tail}.csv"),
         "symbols": find_data(f"symbols/{cfg.symbols}.csv"),
-        "wildcards": find_data(f"wildcards/{cfg.wildcards}.csv"),
     }
     for i, name in enumerate(cfg.head):
         files[f"head{i:03d}"] = find_data(f"head/{name}.csv")
@@ -306,7 +262,7 @@ def _fingerprint(cfg: Config, files: dict[str, Path]) -> str:
     # 実行に関わる項目だけ（モード・キー・音などは再コンパイル不要）
     relevant = {
         "tail": cfg.tail, "pure": cfg.pure,
-        "head": cfg.head, "compound": cfg.compound, "wildcards": cfg.wildcards,
+        "head": cfg.head, "compound": cfg.compound,
         "symbols": cfg.symbols, "variants": cfg.variants, "script": cfg.script,
         "preedit": cfg.preedit, "preedit_map": cfg.preedit_map,
     }
@@ -359,33 +315,28 @@ def compile_tables(cfg: Config) -> Compiled:
     c.heads = {k: tuple(v) for k, v in heads.items()}
 
     # 複合首辞
-    wc = load_pairs(files["wildcards"])
     rev = Reverse(heads, [c.tail, *c.pures])
     compound: dict[str, list[tuple[str, str, bool]]] = {}
     for key in sorted(k for k in files if k.startswith("compound")):
         path = files[key]
         skipped: list[str] = []
-        for no, raw in load_compound(path):
-            texts, had_star, missing = expand_wildcards(raw, wc)
-            for ch in missing:
-                c.warnings.append(f"{path.name}:{no}: {ch}* の展開が wildcards 表にありません（{ch} のまま扱います）")
-            made_any = False
-            for text in texts:
-                if not char_ok(text):
-                    made_any = True  # 絞り込みで除いたものは、打てないわけではない
-                    continue
-                strokes = rev.strokes(text)
-                if not strokes:
-                    continue
-                made_any = True
-                hk = has_kana(text)
-                for stroke, pb in strokes:
-                    lst = compound.setdefault(stroke, [])
-                    entry = (text, pb, hk)
-                    if entry not in lst:
-                        lst.append(entry)
-            if not made_any:
-                skipped.append(raw)
+        try:
+            entries = load_sections(path)
+        except SectionError as e:
+            raise TableError(str(e)) from e
+        for no, label, text in entries:
+            if not char_ok(text):
+                continue  # 絞り込みで除いたもの
+            strokes = rev.strokes(text)
+            if not strokes:
+                skipped.append(text)
+                continue
+            hk = has_kana(text)
+            for stroke, pb in strokes:
+                lst = compound.setdefault(stroke, [])
+                entry = (text, pb, hk)
+                if entry not in lst:
+                    lst.append(entry)
         if skipped:
             shown = "、".join(skipped[:5]) + ("…" if len(skipped) > 5 else "")
             c.warnings.append(

@@ -4,11 +4,11 @@ import pytest
 
 from c01.config import Config, ConfigError, load_config
 from c01.importer import import_cangjie5_txt
+from c01.sections import SectionError, load_sections
 from c01.tables import (
     TableError,
     compile_tables,
     current_fingerprint,
-    expand_wildcards,
     load_cangjie,
     load_or_compile,
     load_romaji,
@@ -71,35 +71,58 @@ def test_bundled_compound_lists_compile_without_warnings(hepburn_compiled):
     assert {"倉頡", "去る", "去っ", "真ん中", "ラ行", "その他", "による", "によって"} <= texts
 
 
-# ---- ワイルドカード ------------------------------------------------------
+# ---- セクション形式 ------------------------------------------------------
 
-WC = {"る": "らりるれろっ", "む": "まみむめもん", "ぬ": "なにぬねのん"}
-
-
-def test_wildcard_expansion():
-    out, had, missing = expand_wildcards("去る*", WC)
-    assert out == ["去ら", "去り", "去る", "去れ", "去ろ", "去っ"] and had and not missing
-    out, _, _ = expand_wildcards("読む*", WC)
-    assert "読ん" in out and "読め" in out
-    out, _, _ = expand_wildcards("死ぬ*", WC)
-    assert "死ん" in out
+def _sec(tmp_path, body):
+    p = tmp_path / "t.txt"
+    p.write_text(body, encoding="utf-8")
+    return load_sections(p)
 
 
-def test_wildcard_plain_and_missing():
-    assert expand_wildcards("必ず", WC) == (["必ず"], False, [])
-    out, had, missing = expand_wildcards("去ふ*", WC)
-    assert out == ["去ふ"] and had and missing == ["ふ"]
+def test_section_basic(tmp_path):
+    items = _sec(tmp_path, "; 注釈\n[甲]\n日\n木\n[助詞]\nは\nが\n[く]\n()\nか\nき\n"
+                 "[!A]\n(甲)(助詞)\n必ず\n[!B]\n咲(く)\n")
+    assert [(l, t) for _, l, t in items] == [
+        ("A", "日は"), ("A", "日が"), ("A", "木は"), ("A", "木が"), ("A", "必ず"),
+        ("B", "咲"), ("B", "咲か"), ("B", "咲き"),
+    ]
 
 
-def test_bundled_wildcards_cover_stated_rows():
-    from c01.config import find_data
-    from c01.tables import load_pairs
+def test_section_nesting_and_predefined(tmp_path):
+    items = _sec(tmp_path, "[a]\nい\n[b]\n(a)\nう\n[!X]\n(OPEN)(b)(CLOSE)\n")
+    assert [t for _, _, t in items] == ["(い)", "(う)"]
 
-    wc = load_pairs(find_data("wildcards/default.csv"))
-    assert set("らりるれろっ") <= set(wc["る"])
-    assert "ん" in wc["む"] and "ん" in wc["ぬ"]
-    assert set("わゐうゑを") <= set(wc["ふ"])  # ふ* は わ行 を含む
-    assert set("わゐ𛄟ゑを") <= set(wc["𛄟"])  # わ行 は 𛄟*
+
+@pytest.mark.parametrize(
+    "body, msg",
+    [
+        ("[!X]\n(無い)\n", "定義されていません"),  # 未定義
+        ("[!X]\n(a)\n[a]\nい\n", "定義されていません"),  # 先に参照
+        ("[a]\nい\n[a]\nう\n", "すでに定義"),
+        ("[OPEN]\nx\n", "定義済み"),
+        ("い\n[a]\n", "より前"),
+        ("[!X]\n咲(く\n", "括弧"),
+    ],
+)
+def test_section_errors(tmp_path, body, msg):
+    with pytest.raises(SectionError, match=msg):
+        _sec(tmp_path, body)
+
+
+def test_references_do_not_cross_files(tmp_path, monkeypatch):
+    monkeypatch.setenv("C01_DATA_DIR", str(tmp_path))
+    (tmp_path / "compound").mkdir()
+    (tmp_path / "compound/a.txt").write_text("[甲]\n日\n", encoding="utf-8")
+    (tmp_path / "compound/b.txt").write_text("[!X]\n(甲)は\n", encoding="utf-8")
+    with pytest.raises(TableError, match="定義されていません"):
+        compile_tables(Config(compound=["a", "b"]))
+
+
+def test_bundled_classes_do_not_make_nonexistent_forms(hepburn_compiled):
+    texts = {e[0] for entries in hepburn_compiled.compound.values() for e in entries}
+    assert {"見る", "見れ", "見ろ"} <= texts
+    assert not texts & {"見り", "見っ", "見ら"}  # 一段活用の型には無い形
+    assert {"去り", "去っ", "老いる", "悲しい", "日は", "木では", "いらっしゃい"} <= texts
 
 
 # ---- 字種の絞り込み ------------------------------------------------------
@@ -126,7 +149,7 @@ def test_script_filter_also_filters_compound_entries(tmp_path, monkeypatch):
     write_csv(tmp_path / "variants/t.csv", [("倉", "trad"), ("仓", "simp")])
     cfg = _mini(tmp_path, monkeypatch, variants="t", script="simp")
     (tmp_path / "compound").mkdir()
-    (tmp_path / "compound/j.txt").write_text("倉日\n仓日\n", encoding="utf-8")
+    (tmp_path / "compound/j.txt").write_text("[!x]\n倉日\n仓日\n", encoding="utf-8")
     cfg.compound = ["j"]
     c = compile_tables(cfg)
     assert [e[0] for e in c.compound["oiara"]] == ["仓日"]
@@ -171,8 +194,8 @@ def test_user_table_overrides_bundled(tmp_path, monkeypatch):
 def test_compound_priority_follows_list_order(tmp_path, monkeypatch):
     cfg = _mini(tmp_path, monkeypatch)
     (tmp_path / "compound").mkdir()
-    (tmp_path / "compound/x.txt").write_text("倉\n", encoding="utf-8")
-    (tmp_path / "compound/y.txt").write_text("仓\n", encoding="utf-8")
+    (tmp_path / "compound/x.txt").write_text("[!x]\n倉\n", encoding="utf-8")
+    (tmp_path / "compound/y.txt").write_text("[!x]\n仓\n", encoding="utf-8")
     cfg.compound = ["x", "y"]
     assert [e[0] for e in compile_tables(cfg).compound["oiar"]] == ["倉", "仓"]
     cfg.compound = ["y", "x"]
@@ -190,7 +213,7 @@ def test_head_priority_follows_list_order(tmp_path, monkeypatch):
 def test_unmakeable_entries_warn_and_are_skipped(tmp_path, monkeypatch):
     cfg = _mini(tmp_path, monkeypatch)
     (tmp_path / "compound").mkdir()
-    (tmp_path / "compound/j.txt").write_text("日月\n日\n", encoding="utf-8")  # 月 は表に無い
+    (tmp_path / "compound/j.txt").write_text("[!x]\n日月\n日\n", encoding="utf-8")  # 月 は表に無い
     cfg.compound = ["j"]
     c = compile_tables(cfg)
     assert [e[0] for e in c.compound["a"]] == ["日"]
@@ -203,46 +226,14 @@ def test_config_defaults_when_file_missing():
     cfg = load_config()
     assert cfg.mode == "hanwa" and cfg.tail == "hiragana-hepburn" and cfg.pure == ["katakana-hepburn"]
     assert cfg.head == ["cangjie5", "custom"]
-    assert cfg.compound == ["jukugo", "okurigana", "kana_head"]
+    assert cfg.compound == ["default"]
 
 
-def test_config_old_romaji_keys_become_tail_and_pure(tmp_path):
+def test_old_config_keys_are_now_errors(tmp_path):
     p = tmp_path / "c.toml"
-    p.write_text('romaji = "a"\nkatakana = "b"\n', encoding="utf-8")
-    cfg = load_config(p)
-    assert cfg.tail == "hiragana-a" and cfg.pure == ["katakana-b"]
-
-
-def test_old_data_layout_is_still_found(tmp_path, monkeypatch):
-    """前の配置（cangjie/ と romaji/<方式>/）に置いた利用者の表も読める。"""
-    monkeypatch.setenv("C01_DATA_DIR", str(tmp_path))
-    write_csv(tmp_path / "romaji/zz/hiragana.csv", [("a", "あ")])
-    write_csv(tmp_path / "romaji/zz/katakana.csv", [("a", "ア")])
-    write_csv(tmp_path / "cangjie/old.csv", [("日", "a")])
-    cfg = Config(tail="hiragana-zz", pure=["katakana-zz"], head=["old"], compound=[])
-    c = compile_tables(cfg)
-    assert c.tail == {"a": ("あ", "")} and c.pures[0] == {"a": ("ア", "")} and c.heads == {"a": ("日",)}
-
-
-def test_new_layout_wins_over_old(tmp_path, monkeypatch):
-    monkeypatch.setenv("C01_DATA_DIR", str(tmp_path))
-    write_csv(tmp_path / "head/x.csv", [("新", "a")])
-    write_csv(tmp_path / "cangjie/x.csv", [("旧", "a")])
-    assert compile_tables(Config(head=["x"], compound=[])).heads == {"a": ("新",)}
-
-
-def test_config_migrates_old_keys(tmp_path):
-    p = tmp_path / "c.toml"
-    p.write_text(
-        'mode = "hanwa_kata"\ncangjie = "cangjie5"\ncangjie_extra = ["custom"]\n'
-        'kanji_priority = "default"\nhira2kata = "default"\n',
-        encoding="utf-8",
-    )
-    cfg = load_config(p)
-    assert cfg.mode == "hanwa" and cfg.tail == "katakana-hepburn" and cfg.pure == ["katakana-hepburn"]
-    assert cfg.head == ["cangjie5", "custom"]
-    assert len(cfg.notes) == 5
-    assert compile_tables(cfg).warnings[:5] == cfg.notes  # 注意は、コンパイルの結果にも出る
+    p.write_text('romaji = "a"\n', encoding="utf-8")
+    with pytest.raises(ConfigError):
+        load_config(p)
 
 
 def test_config_reads_toml(tmp_path):
